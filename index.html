@@ -90,8 +90,9 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
   border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(10,40,36,.22)}
 .chat-top{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
 .chat-top .avatar{width:40px;height:40px;margin:0;font-size:14px}
+.chat-top > div:nth-child(2){min-width:0}
 .chat-top b{display:block;font-size:15px}
-.chat-top small{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px}
+.chat-top small{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .chat-top small::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
 .chat-new{margin-left:auto;background:none;border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .chat-new:hover{color:var(--ink);border-color:var(--muted)}
@@ -387,15 +388,23 @@ async function loadFromDatabase(){
 }
 loadFromDatabase();
 
+// Та же логика, что в базе (функция normalize_phone): 8 999… / +7 999… / 999… → 7999…
+function normalizePhone(v){
+  const d = String(v).replace(/\D/g, '');
+  if(/^[78]\d{10}$/.test(d)) return '7' + d.slice(1);
+  if(/^[3489]\d{9}$/.test(d)) return '7' + d;
+  return d;
+}
+
 const lead = document.getElementById('lead');
 lead.addEventListener('submit', async e => {
   e.preventDefault();
   const name = document.getElementById('lead-name').value.trim();
-  const phone = document.getElementById('lead-phone').value.replace(/\D/g,'');
+  const phone = normalizePhone(document.getElementById('lead-phone').value);
   const err = document.getElementById('lead-err');
   const btn = lead.querySelector('button');
   if(!name){ err.textContent = 'Укажите имя.'; return; }
-  if(phone.length < 10 || phone.length > 15){ err.textContent = 'Укажите телефон: от 10 до 15 цифр.'; return; }
+  if(!/^7[3489]\d{9}$/.test(phone)){ err.textContent = 'Проверьте номер: нужен российский телефон, например +7 999 123-45-67.'; return; }
   err.textContent = '';
   btn.disabled = true; btn.textContent = 'Отправляем…';
   try{
