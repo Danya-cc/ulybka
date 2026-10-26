@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Улыбка — администратор</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: рабочий экран администратора — шапка, вкладки, сетка «время × врачи» */
+:root{
+  --bg:#F4F7F7; --surface:#FFFFFF; --ink:#0F2B2A; --muted:#55706E; --line:#DCE6E5;
+  --accent:#0E7C6B; --accent-ink:#FFFFFF; --accent-soft:#DDF1EC;
+  --busy:#EEF1F1; --warn:#B4541A; --warn-soft:#FBEBDD; --bad:#B42F2F; --bad-soft:#FBE3E3; --ok-soft:#DDF1EC;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0C1716; --surface:#13211F; --ink:#E6F0EE; --muted:#93AAA7; --line:#22332F;
+  --accent:#3CC2A6; --accent-ink:#06201B; --accent-soft:#163A33;
+  --busy:#182523; --warn:#F0A060; --warn-soft:#3A2A1B; --bad:#F08A8A; --bad-soft:#3A1F1F; --ok-soft:#163A33; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px))}
+h1,h2{font-family:var(--display);font-weight:500;margin:0}
+.btn{border:0;border-radius:999px;padding:9px 16px;background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer;white-space:nowrap}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.small{padding:5px 11px;font-size:13px;font-weight:600}
+.btn.danger{background:transparent;color:var(--bad);border:1px solid var(--bad-soft)}
+.btn:disabled{opacity:.5;cursor:default}
+input,select,textarea{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+.err{color:var(--bad);font-size:14px;min-height:1.2em}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.chip.booked{background:var(--accent-soft);color:var(--accent)}
+.chip.done{background:var(--ok-soft);color:var(--accent)}
+.chip.no_show{background:var(--warn-soft);color:var(--warn)}
+.chip.src{background:var(--busy);color:var(--muted);font-weight:600}
+.chip.new{background:var(--warn-soft);color:var(--warn)}
+.chip.in_progress{background:var(--accent-soft);color:var(--accent)}
+
+/* Вход */
+.login{min-height:100vh;display:grid;place-items:center;padding:24px}
+.login form{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:28px;display:flex;flex-direction:column;gap:14px}
+.login h1{font-size:20px}
+
+/* Шапка и вкладки */
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-block:16px;border-bottom:1px solid var(--line)}
+.logo{font-family:var(--display);font-weight:700;font-size:18px}
+.tabs{display:flex;gap:4px;margin-left:8px;flex-wrap:wrap}
+.tab{background:none;border:0;padding:8px 14px;border-radius:999px;cursor:pointer;font-weight:600;color:var(--muted);display:flex;gap:6px;align-items:center}
+.tab[aria-selected="true"]{background:var(--accent-soft);color:var(--accent)}
+.count{background:var(--warn);color:#fff;border-radius:999px;font-size:11px;padding:0 7px;min-width:18px;text-align:center}
+.who{margin-left:auto;display:flex;gap:10px;align-items:center;font-size:13px;color:var(--muted)}
+main{padding-block:20px 60px}
+
+/* Расписание */
+.daybar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.daybar h2{font-size:20px;min-width:0}
+.daybar input[type=date]{width:auto}
+.stats{display:flex;gap:16px;margin-left:auto;font-size:14px;color:var(--muted);flex-wrap:wrap}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+.grid-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+table.grid{border-collapse:collapse;width:100%;min-width:640px}
+.grid th,.grid td{border-bottom:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+.grid th{font-size:13px;color:var(--muted);font-weight:600;background:var(--surface);position:sticky;top:0}
+.grid th small{display:block;font-weight:500}
+.grid td.time{width:64px;font-variant-numeric:tabular-nums;font-weight:700;color:var(--muted)}
+.grid td+td{border-left:1px solid var(--line)}
+.cell{border-radius:10px;padding:8px 10px;min-height:44px;font-size:14px}
+.cell.free{border:1px dashed var(--line);color:var(--muted);cursor:pointer;background:transparent;width:100%;text-align:left}
+.cell.free:hover{border-color:var(--accent);color:var(--accent)}
+.cell.busy{background:var(--busy);color:var(--muted);font-size:13px}
+.cell.appt{background:var(--accent-soft)}
+.cell.appt.done{opacity:.75}
+.cell.appt.no_show{background:var(--warn-soft)}
+.cell .name{font-weight:700}
+.cell .meta{font-size:13px;color:var(--muted)}
+.cell .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.off{color:var(--line)}
+
+/* Заявки */
+.filters{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.leads{display:grid;gap:10px}
+.lead{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:8px 16px}
+.lead .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lead .acts{display:flex;gap:6px;align-items:start;flex-wrap:wrap;justify-content:flex-end}
+.lead p{margin:0;grid-column:1/-1}
+.phone{font-variant-numeric:tabular-nums;font-weight:700}
+.transcript{grid-column:1/-1;background:var(--bg);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto}
+.tm{max-width:85%;padding:6px 10px;border-radius:12px;font-size:13px;white-space:pre-wrap}
+.tm.user{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
+.tm.assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--line)}
+.empty{padding:40px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:14px}
+
+/* Запись по телефону */
+.book{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.panel h2{font-size:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.slots{display:flex;flex-wrap:wrap;gap:6px}
+.slot{border:1px solid var(--line);background:none;border-radius:10px;padding:6px 10px;cursor:pointer;font-size:13px;text-align:left}
+.slot b{display:block;font-size:14px}
+.slot[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.ok{background:var(--ok-soft);color:var(--accent);border-radius:10px;padding:10px 12px;font-weight:600}
+@media (max-width:760px){ .book,.row{grid-template-columns:1fr} .who{margin-left:0;width:100%} .lead{grid-template-columns:1fr} .lead .acts{justify-content:flex-start} }
+</style>
+</head>
+<body>
+
+<!-- ===== Вход ===== -->
+<section class="login" id="login-view" hidden>
+  <form id="login-form" novalidate>
+    <h1>Улыбка · администратор</h1>
+    <p class="muted" style="margin:0">Вход для сотрудников клиники.</p>
+    <label>Email<input id="login-email" type="email" autocomplete="username" required></label>
+    <label>Пароль<input id="login-pass" type="password" autocomplete="current-password" required></label>
+    <div class="err" id="login-err"></div>
+    <button class="btn" type="submit" id="login-btn">Войти</button>
+  </form>
+</section>
+
+<!-- ===== Панель ===== -->
+<div id="app-view" hidden>
+  <div class="wrap">
+    <header>
+      <span class="logo">Улыбка</span>
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="schedule" aria-selected="true">Расписание</button>
+        <button class="tab" role="tab" data-tab="leads">Заявки <span class="count" id="leads-count" hidden>0</span></button>
+        <button class="tab" role="tab" data-tab="book">Записать пациента</button>
+      </nav>
+      <div class="who"><span id="who"></span><button class="btn ghost small" id="logout">Выйти</button></div>
+    </header>
+
+    <main>
+      <!-- Расписание -->
+      <section id="tab-schedule">
+        <div class="daybar">
+          <button class="btn ghost small" id="day-prev" aria-label="Предыдущий день">←</button>
+          <input type="date" id="day-input">
+          <button class="btn ghost small" id="day-next" aria-label="Следующий день">→</button>
+          <button class="btn ghost small" id="day-today">Сегодня</button>
+          <h2 id="day-title"></h2>
+          <div class="stats" id="day-stats"></div>
+        </div>
+        <div class="grid-wrap"><table class="grid" id="grid"></table></div>
+        <p class="muted" style="font-size:13px">Серым отмечено время, занятое вне системы. Нажмите на свободное время, чтобы записать пациента.</p>
+      </section>
+
+      <!-- Заявки -->
+      <section id="tab-leads" hidden>
+        <div class="filters" id="lead-filters">
+          <button class="btn small" data-f="new">Новые</button>
+          <button class="btn ghost small" data-f="in_progress">В работе</button>
+          <button class="btn ghost small" data-f="done">Закрытые</button>
+        </div>
+        <div class="leads" id="leads"></div>
+      </section>
+
+      <!-- Запись по телефону -->
+      <section id="tab-book" hidden>
+        <div class="book">
+          <div class="panel">
+            <h2>1. Услуга и время</h2>
+            <label>Услуга<select id="b-service"></select></label>
+            <div class="row">
+              <label>Дата<input type="date" id="b-date"></label>
+              <label>Врач<select id="b-doctor"><option value="">Любой</option></select></label>
+            </div>
+            <div class="slots" id="b-slots"></div>
+          </div>
+          <form class="panel" id="b-form" novalidate>
+            <h2>2. Пациент</h2>
+            <label>Имя<input id="b-name" autocomplete="off"></label>
+            <label>Телефон<input id="b-phone" inputmode="tel" autocomplete="off" placeholder="+7 999 123-45-67"></label>
+            <label>Комментарий<textarea id="b-comment" rows="2" placeholder="Жалобы, пожелания"></textarea></label>
+            <div class="err" id="b-err"></div>
+            <div id="b-ok" hidden></div>
+            <button class="btn" type="submit" id="b-submit">Записать</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+/* Панель работает от имени вошедшего сотрудника. Что ему можно — решают правила (RLS) в базе:
+   без записи в таблице staff аккаунт не увидит ни одного пациента. */
+const sb = supabase.createClient('https://jeaqmrzudzaazhzrnnzh.supabase.co', 'sb_publishable_UVXT546-AEnPp61vgYmYLg_ocuKUOym');
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TZ = 'Europe/Moscow';
+const fmtPhone = p => /^7\d{10}$/.test(p) ? `+7 ${p.slice(1,4)} ${p.slice(4,7)}-${p.slice(7,9)}-${p.slice(9)}` : p;
+const timeOf = iso => new Intl.DateTimeFormat('ru-RU', {timeZone:TZ, hour:'2-digit', minute:'2-digit'}).format(new Date(iso));
+const todayMsk = () => new Intl.DateTimeFormat('en-CA', {timeZone:TZ}).format(new Date());
+const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0,10); };
+const SRC = {chat:'чат', phone:'телефон', admin:'админ', form:'форма'};
+const STATUS = {booked:'записан', done:'пришёл', no_show:'не пришёл', cancelled:'отменена', new:'новая', in_progress:'в работе'};
+function normalizePhone(v){ const d = String(v).replace(/\D/g,''); if(/^[78]\d{10}$/.test(d)) return '7'+d.slice(1); if(/^[3489]\d{9}$/.test(d)) return '7'+d; return d; }
+function ago(iso){ const m = Math.round((Date.now() - new Date(iso)) / 60000); if(m < 1) return 'только что'; if(m < 60) return m + ' мин назад'; if(m < 1440) return Math.round(m/60) + ' ч назад'; return new Intl.DateTimeFormat('ru-RU',{timeZone:TZ,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(iso)); }
+
+let doctors = [], services = [];
+let day = todayMsk();
+let leadFilter = 'new';
+
+// ===================== Вход =====================
+async function start(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session) return showLogin();
+  const { data: staff, error } = await sb.rpc('is_staff');
+  if(error || !staff){
+    await sb.auth.signOut();
+    return showLogin('Этот аккаунт не добавлен в сотрудники клиники. Обратитесь к руководителю.');
+  }
+  $('who').textContent = session.user.email;
+  $('login-view').hidden = true; $('app-view').hidden = false;
+  const [d, s] = await Promise.all([
+    sb.from('doctors').select('id, full_name, specialty').order('id'),
+    sb.from('services').select('id, name, price, price_is_from').order('id'),
+  ]);
+  doctors = d.data || []; services = s.data || [];
+  $('b-service').innerHTML = services.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+  $('b-doctor').innerHTML = '<option value="">Любой</option>' + doctors.map(x => `<option value="${x.id}">${esc(x.full_name)}</option>`).join('');
+  $('b-date').value = addDays(todayMsk(), 1);
+  loadDay(); loadLeads(); loadSlotsForBooking();
+  setInterval(() => { if(document.visibilityState === 'visible'){ loadDay(true); loadLeads(true); } }, 30000);
+}
+function showLogin(msg){ $('app-view').hidden = true; $('login-view').hidden = false; $('login-err').textContent = msg || ''; }
+
+$('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = $('login-email').value.trim(), password = $('login-pass').value;
+  if(!email || !password){ $('login-err').textContent = 'Введите email и пароль.'; return; }
+  $('login-btn').disabled = true; $('login-err').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  $('login-btn').disabled = false;
+  if(error){ $('login-err').textContent = error.message.includes('Invalid') ? 'Неверный email или пароль.' : 'Не удалось войти: ' + error.message; return; }
+  start();
+});
+$('logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+
+// ===================== Вкладки =====================
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => openTab(t.dataset.tab)));
+function openTab(name){
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+  ['schedule','leads','book'].forEach(n => $('tab-' + n).hidden = n !== name);
+}
+
+// ===================== Расписание дня =====================
+$('day-input').addEventListener('change', e => { if(e.target.value){ day = e.target.value; loadDay(); } });
+$('day-prev').addEventListener('click', () => { day = addDays(day, -1); loadDay(); });
+$('day-next').addEventListener('click', () => { day = addDays(day, 1); loadDay(); });
+$('day-today').addEventListener('click', () => { day = todayMsk(); loadDay(); });
+
+async function loadDay(silent){
+  $('day-input').value = day;
+  $('day-title').textContent = new Intl.DateTimeFormat('ru-RU', {timeZone:TZ, weekday:'long', day:'numeric', month:'long'}).format(new Date(day + 'T12:00:00+03:00'));
+  const from = day + 'T00:00:00+03:00', to = addDays(day, 1) + 'T00:00:00+03:00';
+  const { data: slots, error } = await sb.from('slots').select('id, doctor_id, starts_at, is_booked').gte('starts_at', from).lt('starts_at', to).order('starts_at');
+  if(error){ $('grid').innerHTML = `<tr><td class="err">Не удалось загрузить расписание: ${esc(error.message)}</td></tr>`; return; }
+  const ids = slots.map(s => s.id);
+  let appts = [];
+  if(ids.length){
+    const r = await sb.from('appointments')
+      .select('id, slot_id, status, source, comment, session_id, patients(full_name, phone), services(name)')
+      .in('slot_id', ids).neq('status', 'cancelled');
+    appts = r.data || [];
+  }
+  renderDay(slots, appts);
+}
+
+function renderDay(slots, appts){
+  const byApptSlot = new Map(appts.map(a => [a.slot_id, a]));
+  const working = doctors.filter(d => slots.some(s => s.doctor_id === d.id));
+  const hours = [...new Set(slots.map(s => timeOf(s.starts_at)))].sort();
+  const counts = { total: appts.length, done: appts.filter(a => a.status === 'done').length, free: slots.filter(s => !s.is_booked && new Date(s.starts_at) > new Date()).length };
+  $('day-stats').innerHTML = `<span>Записей <b>${counts.total}</b></span><span>Пришли <b>${counts.done}</b></span><span>Свободно <b>${counts.free}</b></span>`;
+  if(!working.length){ $('grid').innerHTML = '<tr><td><div class="empty">В этот день никто из врачей не принимает.</div></td></tr>'; return; }
+  let html = '<thead><tr><th></th>' + working.map(d => `<th>${esc(d.full_name)}<small>${esc(d.specialty)}</small></th>`).join('') + '</tr></thead><tbody>';
+  for(const h of hours){
+    html += `<tr><td class="time">${h}</td>`;
+    for(const d of working){
+      const s = slots.find(x => x.doctor_id === d.id && timeOf(x.starts_at) === h);
+      if(!s){ html += '<td><span class="off">—</span></td>'; continue; }
+      const a = byApptSlot.get(s.id);
+      const past = new Date(s.starts_at) <= new Date();
+      if(a){
+        html += `<td><div class="cell appt ${a.status}">
+          <div class="name">${esc(a.patients?.full_name)} <span class="chip ${a.status}">${STATUS[a.status]}</span></div>
+          <div class="meta">${esc(a.services?.name)} · <span class="phone">${esc(fmtPhone(a.patients?.phone))}</span> <span class="chip src">${SRC[a.source] || a.source}</span></div>
+          ${a.comment ? `<div class="meta">${esc(a.comment)}</div>` : ''}
+          <div class="acts">${a.status === 'booked' ? `
+            <button class="btn small" data-act="done" data-id="${a.id}">Пришёл</button>
+            <button class="btn ghost small" data-act="no_show" data-id="${a.id}">Не пришёл</button>
+            ${past ? '' : `<button class="btn danger small" data-act="cancel" data-id="${a.id}">Отменить</button>`}` : `
+            <button class="btn ghost small" data-act="booked" data-id="${a.id}">Вернуть «записан»</button>`}
+          </div></div></td>`;
+      } else if(s.is_booked){
+        html += '<td><div class="cell busy">занято</div></td>';
+      } else if(past){
+        html += '<td><span class="off">—</span></td>';
+      } else {
+        html += `<td><button class="cell free" data-free="${s.id}" data-doctor="${d.id}">свободно</button></td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  $('grid').innerHTML = html + '</tbody>';
+}
+
+// Действия с записью: подтверждение отмены делаем прямо в кнопке (без всплывающих окон)
+$('grid').addEventListener('click', async e => {
+  const free = e.target.closest('[data-free]');
+  if(free){ return prefillBooking(free.dataset.doctor); }
+  const b = e.target.closest('[data-act]'); if(!b) return;
+  if(b.dataset.act === 'cancel' && b.dataset.confirm !== '1'){ b.dataset.confirm = '1'; b.textContent = 'Точно отменить?'; return; }
+  const status = b.dataset.act === 'cancel' ? 'cancelled' : b.dataset.act;
+  b.disabled = true;
+  const { error } = await sb.from('appointments').update({ status }).eq('id', b.dataset.id);
+  if(error){ b.disabled = false; b.textContent = 'Ошибка'; console.error(error); return; }
+  loadDay();
+});
+
+// ===================== Заявки =====================
+$('lead-filters').addEventListener('click', e => {
+  const b = e.target.closest('[data-f]'); if(!b) return;
+  leadFilter = b.dataset.f;
+  document.querySelectorAll('#lead-filters .btn').forEach(x => x.classList.toggle('ghost', x !== b));
+  loadLeads();
+});
+
+async function loadLeads(silent){
+  const [{ data: list }, { count }] = await Promise.all([
+    sb.from('leads').select('*').eq('status', leadFilter).order('created_at', { ascending: false }).limit(100),
+    sb.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'new'),
+  ]);
+  $('leads-count').textContent = count || 0; $('leads-count').hidden = !count;
+  if(silent && document.querySelector('.transcript')) return;   // не сбрасываем открытую переписку
+  const empty = { new: 'Новых заявок нет.', in_progress: 'В работе ничего нет.', done: 'Закрытых заявок пока нет.' }[leadFilter];
+  $('leads').innerHTML = (list && list.length) ? list.map(l => `
+    <article class="lead" data-id="${l.id}">
+      <div class="top"><b>${esc(l.name)}</b><span class="phone">${esc(fmtPhone(l.phone))}</span>
+        <span class="chip ${l.status}">${STATUS[l.status]}</span><span class="chip src">${SRC[l.source] || l.source}</span>
+        <span class="muted" style="font-size:13px">${ago(l.created_at)}</span></div>
+      <div class="acts">
+        ${l.session_id ? `<button class="btn ghost small" data-chat="${l.session_id}">Переписка</button>` : ''}
+        ${l.status === 'new' ? `<button class="btn small" data-lead="in_progress">Взять в работу</button>` : ''}
+        ${l.status !== 'done' ? `<button class="btn ghost small" data-lead="done">Закрыть</button>` : `<button class="btn ghost small" data-lead="new">Открыть снова</button>`}
+      </div>
+      ${l.comment ? `<p>${esc(l.comment)}</p>` : ''}
+    </article>`).join('') : `<div class="empty">${empty}</div>`;
+}
+
+$('leads').addEventListener('click', async e => {
+  const card = e.target.closest('.lead'); if(!card) return;
+  const st = e.target.closest('[data-lead]');
+  if(st){
+    st.disabled = true;
+    const { error } = await sb.from('leads').update({ status: st.dataset.lead }).eq('id', card.dataset.id);
+    if(error){ st.disabled = false; st.textContent = 'Ошибка'; return; }
+    return loadLeads();
+  }
+  const chat = e.target.closest('[data-chat]');
+  if(chat){
+    const open = card.querySelector('.transcript');
+    if(open){ open.remove(); chat.textContent = 'Переписка'; return; }
+    const { data } = await sb.from('messages').select('role, content').eq('session_id', chat.dataset.chat).order('id');
+    const msgs = (data || []).flatMap(m => typeof m.content === 'string' ? [{ role: m.role, text: m.content }]
+      : m.role === 'assistant' ? m.content.filter(b => b.type === 'text').map(b => ({ role: 'assistant', text: b.text })) : []);
+    const box = document.createElement('div'); box.className = 'transcript';
+    box.innerHTML = msgs.map(m => `<div class="tm ${m.role}">${esc(m.text)}</div>`).join('') || '<span class="muted">Переписка пуста.</span>';
+    card.appendChild(box); chat.textContent = 'Скрыть переписку';
+  }
+});
+
+// ===================== Запись по телефону =====================
+let chosenSlot = null;
+['b-service','b-date','b-doctor'].forEach(id => $(id).addEventListener('change', loadSlotsForBooking));
+
+function prefillBooking(doctorId){
+  $('b-date').value = day; $('b-doctor').value = doctorId;
+  openTab('book'); loadSlotsForBooking();
+}
+
+async function loadSlotsForBooking(){
+  chosenSlot = null;
+  const box = $('b-slots');
+  if(!$('b-date').value){ box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="muted">Ищу свободное время…</span>';
+  const { data, error } = await sb.rpc('admin_get_free_slots', {
+    p_service_id: Number($('b-service').value), p_date_from: $('b-date').value, p_date_to: $('b-date').value,
+    p_doctor_id: $('b-doctor').value ? Number($('b-doctor').value) : null,
+  });
+  if(error){ box.innerHTML = `<span class="err">${esc(error.message)}</span>`; return; }
+  box.innerHTML = data.length ? data.map(s => `<button type="button" class="slot" aria-pressed="false" data-slot="${s.slot_id}"><b>${s.start_time}</b>${esc(s.doctor)}</button>`).join('')
+    : '<span class="muted">На этот день свободного времени нет. Выберите другую дату или врача.</span>';
+}
+$('b-slots').addEventListener('click', e => {
+  const b = e.target.closest('[data-slot]'); if(!b) return;
+  document.querySelectorAll('#b-slots .slot').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  chosenSlot = Number(b.dataset.slot); $('b-err').textContent = '';
+});
+
+$('b-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('b-name').value.trim(), phone = normalizePhone($('b-phone').value), err = $('b-err');
+  $('b-ok').hidden = true;
+  if(!chosenSlot){ err.textContent = 'Выберите время слева.'; return; }
+  if(!name){ err.textContent = 'Укажите имя пациента.'; return; }
+  if(!/^7[3489]\d{9}$/.test(phone)){ err.textContent = 'Проверьте телефон: нужен российский номер, например +7 999 123-45-67.'; return; }
+  err.textContent = ''; $('b-submit').disabled = true;
+  const { data, error } = await sb.rpc('admin_book_appointment', {
+    p_slot_id: chosenSlot, p_service_id: Number($('b-service').value), p_full_name: name, p_phone: phone,
+    p_comment: $('b-comment').value.trim() || null,
+  });
+  $('b-submit').disabled = false;
+  if(error){
+    const m = error.message;
+    err.textContent = m.includes('SLOT_TAKEN') ? 'Это время только что заняли. Выберите другое.'
+      : m.includes('DOCTOR_DOES_NOT_PROVIDE_SERVICE') ? 'Этот врач не оказывает выбранную услугу.'
+      : m.includes('SLOT_IN_PAST') ? 'До этого времени меньше часа. Выберите другое.'
+      : 'Не удалось записать: ' + m;
+    return loadSlotsForBooking();
+  }
+  $('b-ok').hidden = false; $('b-ok').className = 'ok';
+  $('b-ok').textContent = `Записано: ${data.patient}, ${data.service}, ${data.doctor}, ${data.starts_at}.`;
+  $('b-name').value = ''; $('b-phone').value = ''; $('b-comment').value = '';
+  loadSlotsForBooking(); loadDay();
+});
+
+start();
+</script>
+</body>
+</html>
