@@ -267,16 +267,29 @@ const ZOYA_URL = 'https://jeaqmrzudzaazhzrnnzh.supabase.co/functions/v1/zoya';
 let sessionId = null;
 try { sessionId = sessionStorage.getItem('zoya_session'); } catch(e) {}
 
+// Все диалоги этого браузера (до 20 последних). По ним Зоя находит записи пациента,
+// даже если он начал новый диалог или вернулся на сайт на следующий день.
+function knownSessions(){
+  try { return JSON.parse(localStorage.getItem('zoya_known_sessions') || '[]'); } catch(e) { return []; }
+}
+function rememberSession(id){
+  try {
+    const list = [id, ...knownSessions().filter(x => x !== id)].slice(0, 20);
+    localStorage.setItem('zoya_known_sessions', JSON.stringify(list));
+  } catch(e) {}
+}
+
 async function askManager(text){
   const res = await fetch(ZOYA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-    body: JSON.stringify({ session_id: sessionId, message: text })
+    body: JSON.stringify({ session_id: sessionId, message: text, known_sessions: knownSessions() })
   });
   if(!res.ok) throw new Error('Зоя ответила ошибкой ' + res.status);
   const data = await res.json();
   if(data.session_id){
     sessionId = data.session_id;
+    rememberSession(sessionId);
     try { sessionStorage.setItem('zoya_session', sessionId); } catch(e) {}
     document.getElementById('chat-new').hidden = false;
   }

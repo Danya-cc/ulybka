@@ -12,8 +12,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const MODEL = "claude-sonnet-5-5";
 const MAX_TOOL_ROUNDS = 6;            // сколько раз подряд Зоя может вызвать инструменты за один ответ
 const MAX_MESSAGE_LENGTH = 1000;      // максимальная длина сообщения пациента
-const MAX_USER_MESSAGES_PER_SESSION = 40;
-const MAX_USER_MESSAGES_PER_10_MIN = 15;
+const MAX_USER_MESSAGES_PER_SESSION = 80;   // защита баланса API от ботов; живому пациенту с запасом
+const MAX_USER_MESSAGES_PER_10_MIN = 30;
+const MAX_KNOWN_SESSIONS = 20;              // сколько прошлых диалогов браузера учитывать
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -52,7 +53,7 @@ function systemPrompt(): string {
 1. Рассказывать об услугах, ценах и врачах. Всегда бери цены и врачей из инструмента get_services, не по памяти.
 2. Подбирать свободное время через get_free_slots. Предлагай 2–3 варианта, а не весь список.
 3. Записывать на приём через book_appointment.
-4. Переносить и отменять записи, сделанные в этом же чате (get_my_appointments, reschedule_appointment, cancel_appointment).
+4. Переносить и отменять записи, сделанные с этого устройства — в этом или прошлых чатах на сайте (get_my_appointments, reschedule_appointment, cancel_appointment).
 5. Оставлять заявку на звонок администратора через create_lead.
 
 Имена и названия:
@@ -69,12 +70,12 @@ function systemPrompt(): string {
 - Если время уже заняли, извинись и сразу предложи ближайшие свободные варианты.
 
 Перенос и отмена:
-- Сначала вызови get_my_appointments: он покажет записи, сделанные в этом чате.
+- Сначала вызови get_my_appointments: он покажет записи, сделанные в чате на сайте с этого устройства.
 - Если нужная запись там есть: для переноса подбери новое время через get_free_slots, повтори «было → станет» и после согласия вызови reschedule_appointment; для отмены переспроси и после согласия вызови cancel_appointment.
-- Если записи в этом чате нет (пациент записывался по телефону, в другой день или в другом окне), ты не можешь проверить, что это его запись. Тогда оформи заявку через create_lead: администратор перезвонит и всё сделает.
+- Если нужной записи там нет (пациент записывался по телефону или с другого устройства), ты не можешь проверить, что это его запись. Тогда оформи заявку через create_lead: администратор перезвонит и всё сделает.
 
 Когда создавать заявку (create_lead), а не записывать:
-- перенос или отмена записи, сделанной не в этом чате;
+- перенос или отмена записи, которой нет в get_my_appointments;
 - запись ребёнка, сложный план лечения, вопрос о стоимости комплексного лечения;
 - жалоба или недовольство;
 - пациент просит, чтобы ему перезвонили.
@@ -138,12 +139,12 @@ const TOOLS = [
   },
   {
     name: "get_my_appointments",
-    description: "Активные будущие записи, которые пациент сделал в ЭТОМ чате: appointment_id, услуга, врач, дата, время, имя, телефон.",
+    description: "Активные будущие записи, которые пациент сделал в чате на сайте с ЭТОГО устройства (в этом или прошлых диалогах): appointment_id, услуга, врач, дата, время, имя, телефон.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "reschedule_appointment",
-    description: "Перенести запись из этого чата на другое свободное время (услуга та же). Вызывать только после согласия пациента. Если новое время недоступно, старая запись остаётся.",
+    description: "Перенести запись из get_my_appointments на другое свободное время (услуга та же). Вызывать только после согласия пациента. Если новое время недоступно, старая запись остаётся.",
     input_schema: {
       type: "object",
       properties: {
@@ -155,7 +156,7 @@ const TOOLS = [
   },
   {
     name: "cancel_appointment",
-    description: "Отменить запись из этого чата. Вызывать только после того, как пациент подтвердил отмену.",
+    description: "Отменить запись из get_my_appointments. Вызывать только после того, как пациент подтвердил отмену.",
     input_schema: {
       type: "object",
       properties: { appointment_id: { type: "integer", description: "appointment_id из get_my_appointments" } },
@@ -164,7 +165,7 @@ const TOOLS = [
   },
   {
     name: "create_lead",
-    description: "Создать заявку, чтобы администратор перезвонил пациенту: отмена или перенос записи, сделанной НЕ в этом чате, сложный вопрос, жалоба, просьба перезвонить.",
+    description: "Создать заявку, чтобы администратор перезвонил пациенту: отмена или перенос записи, которой нет в get_my_appointments, сложный вопрос, жалоба, просьба перезвонить.",
     input_schema: {
       type: "object",
       properties: {
@@ -186,7 +187,7 @@ const DB_ERRORS: Record<string, string> = {
   SLOT_BELONGS_TO_OTHER_DOCTOR: "Слот принадлежит другому врачу. Заново найди время через get_free_slots.",
   INVALID_PHONE: "Телефон указан неверно. Попроси пациента указать номер полностью, например +7 999 123-45-67.",
   INVALID_NAME: "Имя не указано. Уточни, как зовут пациента.",
-  APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не в этом чате, менять её нельзя. Оформи заявку администратору через create_lead.",
+  APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не с этого устройства, менять её нельзя. Оформи заявку администратору через create_lead.",
   APPOINTMENT_NOT_ACTIVE: "Эта запись уже отменена или завершена.",
   APPOINTMENT_IN_PAST: "Время этой записи уже прошло.",
   SAME_SLOT: "Пациент уже записан на это время.",
@@ -197,7 +198,7 @@ const explain = (msg: string) => {
 };
 
 // ---------- Инструменты: выполнение ----------
-async function runTool(name: string, input: any, sessionId: string): Promise<{ content: string; is_error?: boolean }> {
+async function runTool(name: string, input: any, sessionId: string, owned: string[]): Promise<{ content: string; is_error?: boolean }> {
   try {
     if (name === "get_services") {
       const { data, error } = await db
@@ -242,14 +243,14 @@ async function runTool(name: string, input: any, sessionId: string): Promise<{ c
     }
 
     if (name === "get_my_appointments") {
-      const { data, error } = await db.rpc("get_session_appointments", { p_session_id: sessionId });
+      const { data, error } = await db.rpc("get_session_appointments", { p_session_ids: owned });
       if (error) throw error;
-      return { content: data.length ? JSON.stringify(data) : "В этом чате нет активных записей." };
+      return { content: data.length ? JSON.stringify(data) : "Записей, сделанных в чате с этого устройства, нет." };
     }
 
     if (name === "reschedule_appointment") {
       const { data, error } = await db.rpc("reschedule_appointment", {
-        p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_session_id: sessionId,
+        p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_session_ids: owned,
       });
       if (error) throw error;
       return { content: "Запись перенесена: " + JSON.stringify(data) };
@@ -257,7 +258,7 @@ async function runTool(name: string, input: any, sessionId: string): Promise<{ c
 
     if (name === "cancel_appointment") {
       const { data, error } = await db.rpc("cancel_appointment", {
-        p_appointment_id: input.appointment_id, p_session_id: sessionId,
+        p_appointment_id: input.appointment_id, p_session_ids: owned,
       });
       if (error) throw error;
       return { content: "Запись отменена: " + JSON.stringify(data) };
@@ -354,9 +355,22 @@ Deno.serve(async (req) => {
   // Лимиты: защита от спама и от того, чтобы кто-то сжёг весь баланс API
   const userTexts = rows.filter((r: any) => r.role === "user" && typeof r.content === "string");
   const tenMinAgo = Date.now() - 10 * 60 * 1000;
-  if (userTexts.length >= MAX_USER_MESSAGES_PER_SESSION ||
-      userTexts.filter((r: any) => new Date(r.created_at).getTime() > tenMinAgo).length >= MAX_USER_MESSAGES_PER_10_MIN) {
-    return json({ session_id: sessionId, reply: "Чтобы ничего не напутать, давайте продолжим по телефону: +7 (495) 000-12-34. Администратор ответит на все вопросы." });
+  if (userTexts.length >= MAX_USER_MESSAGES_PER_SESSION) {
+    return json({ session_id: sessionId, reply: "Этот диалог получился очень длинным. Нажмите «Новый диалог» вверху окна: я по-прежнему увижу ваши записи и помогу с ними. Или позвоните нам: +7 (495) 000-12-34." });
+  }
+  if (userTexts.filter((r: any) => new Date(r.created_at).getTime() > tenMinAgo).length >= MAX_USER_MESSAGES_PER_10_MIN) {
+    return json({ session_id: sessionId, reply: "Вы отправили много сообщений подряд. Подождите, пожалуйста, пару минут и напишите снова. Если срочно — звоните: +7 (495) 000-12-34." });
+  }
+
+  // Прошлые диалоги этого браузера: записи из них пациент тоже может переносить и отменять.
+  // Принимаем только существующие диалоги; номер диалога — случайный UUID, угадать чужой нельзя.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const claimed = (Array.isArray(body?.known_sessions) ? body.known_sessions : [])
+    .filter((x: unknown) => typeof x === "string" && UUID.test(x as string)).slice(0, MAX_KNOWN_SESSIONS);
+  let owned: string[] = [sessionId!];
+  if (claimed.length) {
+    const { data: existing } = await db.from("chat_sessions").select("id").in("id", claimed);
+    owned = [...new Set([sessionId!, ...(existing ?? []).map((r: any) => r.id)])];
   }
 
   const history: any[] = rows.map((r: any) => ({ role: r.role, content: r.content }));
@@ -377,7 +391,7 @@ Deno.serve(async (req) => {
       const results = [];
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
-        const r = await runTool(block.name, block.input, sessionId!);
+        const r = await runTool(block.name, block.input, sessionId!, owned);
         console.log(JSON.stringify({ session: sessionId, tool: block.name, input: block.input, error: !!r.is_error }));
         results.push({ type: "tool_result", tool_use_id: block.id, content: r.content, ...(r.is_error ? { is_error: true } : {}) });
       }
