@@ -271,7 +271,7 @@ async function loadDay(silent){
   let appts = [];
   if(ids.length){
     const r = await sb.from('appointments')
-      .select('id, slot_id, status, source, comment, session_id, patients(full_name, phone), services(name)')
+      .select('id, slot_id, status, source, comment, session_id, reminder_sent_at, confirmed_at, patients(full_name, phone, tg_chat_id), services(name)')
       .in('slot_id', ids).neq('status', 'cancelled');
     appts = r.data || [];
   }
@@ -298,9 +298,15 @@ function renderDay(slots, appts){
           <div class="name">${esc(a.patients?.full_name)} <span class="chip ${a.status}">${STATUS[a.status]}</span></div>
           <div class="meta">${esc(a.services?.name)} · <span class="phone">${esc(fmtPhone(a.patients?.phone))}</span> <span class="chip src">${SRC[a.source] || a.source}</span></div>
           ${a.comment ? `<div class="meta">${esc(a.comment)}</div>` : ''}
+          ${a.status === 'booked' ? `<div class="meta">${
+            a.confirmed_at ? '<span class="chip done">✓ подтвердил</span>'
+            : a.reminder_sent_at ? '<span class="chip src">напомнили в Telegram, ждём ответа</span>'
+            : a.patients?.tg_chat_id ? '<span class="chip src">Telegram подключён</span>'
+            : '<span class="chip no_show">нет Telegram — напомнить звонком</span>'}</div>` : ''}
           <div class="acts">${a.status === 'booked' ? `
             <button class="btn small" data-act="done" data-id="${a.id}">Пришёл</button>
             <button class="btn ghost small" data-act="no_show" data-id="${a.id}">Не пришёл</button>
+            ${a.confirmed_at ? '' : `<button class="btn ghost small" data-act="confirm" data-id="${a.id}">Подтвердил</button>`}
             ${past ? '' : `<button class="btn danger small" data-act="cancel" data-id="${a.id}">Отменить</button>`}` : `
             <button class="btn ghost small" data-act="booked" data-id="${a.id}">Вернуть «записан»</button>`}
           </div></div></td>`;
@@ -323,9 +329,10 @@ $('grid').addEventListener('click', async e => {
   if(free){ return prefillBooking(free.dataset.doctor); }
   const b = e.target.closest('[data-act]'); if(!b) return;
   if(b.dataset.act === 'cancel' && b.dataset.confirm !== '1'){ b.dataset.confirm = '1'; b.textContent = 'Точно отменить?'; return; }
-  const status = b.dataset.act === 'cancel' ? 'cancelled' : b.dataset.act;
+  const change = b.dataset.act === 'confirm' ? { confirmed_at: new Date().toISOString() }
+    : { status: b.dataset.act === 'cancel' ? 'cancelled' : b.dataset.act };
   b.disabled = true;
-  const { error } = await sb.from('appointments').update({ status }).eq('id', b.dataset.id);
+  const { error } = await sb.from('appointments').update(change).eq('id', b.dataset.id);
   if(error){
     console.error(error);
     b.disabled = false; b.textContent = 'Не получилось';

@@ -103,6 +103,8 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
 .m.bot{background:var(--bubble);border-bottom-left-radius:4px;align-self:flex-start}
 .m.me{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px;align-self:flex-end}
 .m.typing{color:var(--muted);font-style:italic}
+.tg-link{display:inline-block;margin-top:6px;padding:8px 14px;border-radius:999px;background:#2AABEE;color:#fff;font-weight:700;text-decoration:none;white-space:normal}
+.tg-link:hover{background:#229ED9}
 .quick{display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px}
 .quick button{border:1px solid var(--line);background:none;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
 .chat form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
@@ -238,7 +240,17 @@ let busy = false;
 function addMsg(text, who){
   const d = document.createElement('div');
   d.className = 'm ' + who;
-  d.textContent = text;
+  // Ссылки на Telegram-бота делаем кликабельными; остальной текст — только как текст (без HTML)
+  String(text).split(/(https:\/\/t\.me\/[A-Za-z0-9_]{5,32}\?start=[A-Za-z0-9_-]{8,64})/).forEach((part, i) => {
+    if(i % 2){
+      const a = document.createElement('a');
+      a.href = part; a.target = '_blank'; a.rel = 'noopener';
+      a.className = 'tg-link'; a.textContent = 'Подключить напоминания в Telegram';
+      d.appendChild(a);
+    } else if(part){
+      d.appendChild(document.createTextNode(part));
+    }
+  });
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
   return d;

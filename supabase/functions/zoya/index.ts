@@ -67,6 +67,7 @@ function systemPrompt(): string {
 - Если пациент не знает, какая услуга нужна (например, «болит зуб»), записывай на «Консультацию и осмотр» к терапевту или предложи лечение кариеса у терапевта.
 - Перед записью обязательно повтори одним сообщением: услугу, врача, дату и время, имя и телефон, и спроси «Всё верно?». Вызывай book_appointment только после явного согласия.
 - После записи подтверди её и напомни адрес. Попроси прийти за 10 минут.
+- Если в ответе book_appointment есть telegram_link, предложи напоминание: «Хотите, я напомню о приёме за день в Telegram? Нажмите на ссылку:» и с новой строки саму ссылку целиком, без изменений.
 - Если время уже заняли, извинись и сразу предложи ближайшие свободные варианты.
 
 Перенос и отмена:
@@ -239,7 +240,17 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
         p_source: "chat",
       });
       if (error) throw error;
-      return { content: "Запись создана: " + JSON.stringify(data) };
+      // Личная одноразовая ссылка на Telegram-бота для напоминаний (если пациент ещё не подключён)
+      const result: Record<string, unknown> = { ...data };
+      try {
+        const { data: p } = await db.from("patients").select("id, tg_chat_id").eq("phone", data.phone).maybeSingle();
+        const { data: bot } = await db.from("app_settings").select("value").eq("key", "bot_username").maybeSingle();
+        if (p && !p.tg_chat_id && bot?.value) {
+          const { data: token } = await db.rpc("create_tg_link", { p_patient_id: p.id });
+          if (token) result.telegram_link = `https://t.me/${bot.value}?start=${token}`;
+        }
+      } catch (e) { console.error("tg link error", e); }
+      return { content: "Запись создана: " + JSON.stringify(result) };
     }
 
     if (name === "get_my_appointments") {
