@@ -1,4 +1,4 @@
-// Бот клиники «Улыбка» для пациентов в Telegram — второй агент системы.
+// Лида — ассистент клиники «Улыбка» в Telegram, второй агент системы (первый — Зоя на сайте).
 //
 // Что умеет:
 //   • /start <токен> — привязывает Telegram к пациенту (одноразовая ссылка, которую Зоя даёт после записи);
@@ -53,7 +53,7 @@ const reminderKeyboard = (id: number) => ({
   ]],
 });
 const reminderText = (r: any) =>
-  `Здравствуйте, ${r.patient}!\n\nНапоминаем о приёме завтра, ${r.weekday} ${r.date}, в ${r.start_time}.\n` +
+  `Здравствуйте, ${r.patient}! Это Лида из клиники «Улыбка».\n\nНапоминаю о приёме завтра, ${r.weekday} ${r.date}, в ${r.start_time}.\n` +
   `${r.service} — ${r.doctor}.\n\nАдрес: ул. Садовая, 12, 2 этаж, м. «Парковая».\nПридёте?`;
 
 async function sendReminders() {
@@ -77,7 +77,9 @@ function systemPrompt(patient: any) {
   const now = new Date();
   const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Moscow", ...o }).format(now);
   const iso = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow" }).format(now);
-  return `Ты Зоя, администратор стоматологии «Улыбка». Ты переписываешься в Telegram с пациентом: ${patient.full_name}, телефон ${patient.phone}. Личность пациента уже подтверждена — он привязал Telegram по личной ссылке после записи.
+  return `Ты Лида, ассистент стоматологии «Улыбка» в Telegram. Ты отвечаешь за напоминания о приёмах и помогаешь пациентам подтвердить, перенести или отменить запись. На сайте клиники с пациентами общается администратор Зоя — ты её коллега; если пациент упоминает Зою или разговор на сайте, это нормально.
+
+Твой собеседник — пациент ${patient.full_name}, телефон ${patient.phone}. Личность пациента уже подтверждена — он привязал Telegram по личной ссылке после записи.
 
 Сейчас: ${fmt({ weekday: "long", day: "numeric", month: "long" })}, ${fmt({ hour: "2-digit", minute: "2-digit" })} по Москве. Сегодняшняя дата для инструментов: ${iso}.
 
@@ -234,7 +236,7 @@ async function runAgent(chatId: number, patient: any, text: string) {
 }
 
 // ---------------- Обработка сообщений и кнопок ----------------
-const NOT_LINKED = `Здравствуйте! Это бот стоматологии «Улыбка».\n\nЧтобы получать напоминания о приёме, запишитесь на сайте ${SITE_URL} — после записи администратор Зоя пришлёт личную ссылку на этого бота.`;
+const NOT_LINKED = `Здравствуйте! Это Лида, ассистент стоматологии «Улыбка».\n\nЧтобы получать напоминания о приёме, запишитесь на сайте ${SITE_URL} — после записи администратор Зоя пришлёт личную ссылку на этого бота.`;
 
 async function patientByChat(chatId: number) {
   const { data } = await db.from("patients").select("id, full_name, phone").eq("tg_chat_id", chatId).maybeSingle();
@@ -262,10 +264,10 @@ async function handleMessage(msg: any) {
         const p = await patientByChat(chatId);
         return send(chatId, p ? `${why} Но вы уже подключены, ${p.full_name}: я напомню о приёме за день.` : `${why}\n\n${NOT_LINKED}`);
       }
-      return send(chatId, `Готово, ${data.name}! Теперь я напомню о приёме за день до визита. Здесь же можно перенести или отменить запись — просто напишите.${await upcomingText(data.patient_id)}`);
+      return send(chatId, `Готово, ${data.name}! Я Лида, ассистент клиники «Улыбка». Напомню о приёме за день до визита. Здесь же можно перенести или отменить запись — просто напишите.${await upcomingText(data.patient_id)}`);
     }
     const p = await patientByChat(chatId);
-    return send(chatId, p ? `Здравствуйте, ${p.full_name}! Я напомню о приёме за день. Чем помочь?${await upcomingText(p.id)}` : NOT_LINKED);
+    return send(chatId, p ? `Здравствуйте, ${p.full_name}! Это Лида из клиники «Улыбка». Я напомню о приёме за день. Чем помочь?${await upcomingText(p.id)}` : NOT_LINKED);
   }
 
   const patient = await patientByChat(chatId);
@@ -338,6 +340,13 @@ Deno.serve(async (req) => {
       await setSetting("bot_username", me.username);
       if (!cronSecret) await setSetting("cron_secret", randomHex(24));
       return json({ ok: true, bot: "@" + me.username });
+    }
+    if (body.action === "set_profile") {
+      if (!authorized) return json({ error: "Forbidden" }, 403);
+      await tg("setMyName", { name: "Лида · клиника «Улыбка»" });
+      await tg("setMyShortDescription", { short_description: "Напоминаю о приёме в стоматологии «Улыбка», помогаю перенести или отменить запись." });
+      await tg("setMyDescription", { description: "Здравствуйте! Я Лида, ассистент стоматологии «Улыбка».\n\nНапомню о приёме за день до визита, помогу подтвердить, перенести или отменить запись.\n\nЧтобы подключиться, запишитесь на сайте — администратор Зоя пришлёт личную ссылку." });
+      return json({ ok: true });
     }
     if (body.action === "send_reminders") {
       if (!authorized) return json({ error: "Forbidden" }, 403);
