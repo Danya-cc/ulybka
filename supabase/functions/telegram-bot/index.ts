@@ -252,10 +252,6 @@ async function handleMessage(msg: any) {
   const chatId = msg.chat.id;
   const text = msg.text.trim().slice(0, 1000);
 
-  if (String(chatId) === (await getSetting("admin_chat_id"))) {
-    return send(chatId, "Это служебный чат клиники: сюда приходят уведомления о записях и заявках.");
-  }
-
   if (text.startsWith("/start")) {
     const token = text.split(/\s+/)[1];
     if (token) {
@@ -273,7 +269,13 @@ async function handleMessage(msg: any) {
   }
 
   const patient = await patientByChat(chatId);
-  if (!patient) return send(chatId, NOT_LINKED);
+  if (!patient) {
+    // Чат администратора: сюда приходят уведомления. Если админ сам подписался как пациент — работаем как с пациентом.
+    if (String(chatId) === (await getSetting("admin_chat_id"))) {
+      return send(chatId, "Это служебный чат клиники: сюда приходят уведомления о записях и заявках.");
+    }
+    return send(chatId, NOT_LINKED);
+  }
   await tg("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
   return send(chatId, await runAgent(chatId, patient, text));
 }
