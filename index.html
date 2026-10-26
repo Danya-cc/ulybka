@@ -23,6 +23,8 @@
   --accent:#3CC2A6; --accent-ink:#06201B; --accent-soft:#163A33; --bubble:#1B2C29; color-scheme:dark}
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .wrap{max-width:1080px;margin:0 auto}
@@ -102,6 +104,9 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
 .chat form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
 .chat input{flex:1;min-width:0;padding:11px 14px;border-radius:999px;border:1px solid var(--line);background:var(--bg)}
 .chat form .btn{padding:11px 16px}
+.chat form{padding-bottom:6px}
+.consent{margin:0;padding:0 16px 12px;font-size:11px;line-height:1.4;color:var(--muted)}
+.chat form .btn:disabled{opacity:.5;cursor:default}
 
 @media (max-width:760px){
   .hero,.contacts{grid-template-columns:1fr}
@@ -213,6 +218,7 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
     <input id="chat-input" placeholder="Напишите сообщение…" autocomplete="off">
     <button class="btn" type="submit" aria-label="Отправить">→</button>
   </form>
+  <p class="consent">Отправляя сообщение, вы соглашаетесь на обработку персональных данных. Зоя — ИИ-ассистент клиники.</p>
 </div>
 
 <script>
@@ -220,7 +226,9 @@ const chat = document.getElementById('chat');
 const fab = document.getElementById('chat-fab');
 const msgs = document.getElementById('msgs');
 const input = document.getElementById('chat-input');
+const sendBtn = document.querySelector('#chat-form .btn');
 let greeted = false;
+let busy = false;
 
 function addMsg(text, who){
   const d = document.createElement('div');
@@ -244,29 +252,36 @@ document.getElementById('chat-close').addEventListener('click', closeChat);
 document.querySelectorAll('[data-open-chat]').forEach(b => b.addEventListener('click', () => openChat(b.dataset.openChat)));
 document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', () => send(b.textContent)));
 
-/*
-  ЗАГЛУШКА. Сейчас ответы придуманы прямо здесь, по ключевым словам.
-  На следующем шаге эта функция будет отправлять сообщение в Supabase Edge Function:
-    const res = await fetch('https://<проект>.supabase.co/functions/v1/zoya', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id, message: text })
-    });
-    return (await res.json()).reply;
-*/
+/* ================= ЗОЯ =================
+   Сообщение уходит в Supabase Edge Function «zoya». Там цикл агента:
+   Claude думает, ходит в базу через инструменты и возвращает ответ.
+   session_id — номер диалога: по нему Зоя помнит, о чём вы говорили. */
+const ZOYA_URL = 'https://jeaqmrzudzaazhzrnnzh.supabase.co/functions/v1/zoya';
+let sessionId = null;
+try { sessionId = sessionStorage.getItem('zoya_session'); } catch(e) {}
+
 async function askManager(text){
-  await new Promise(r => setTimeout(r, 700));
-  const t = text.toLowerCase();
-  if(t.includes('чистк')) return 'Профессиональная чистка стоит 3 000 ₽ и занимает около часа. Сегодня свободно в 14:00 и 16:00 у доктора Ивановой. Записать вас?';
-  if(t.includes('запис')) return 'С радостью запишу. Подскажите, пожалуйста, какая услуга нужна и в какой день вам удобно?';
-  if(t.includes('где') || t.includes('адрес')) return 'Мы на ул. Садовой, 12, 2 этаж, в 5 минутах от метро «Парковая». Работаем ежедневно с 9:00 до 21:00.';
-  if(t.includes('цен') || t.includes('стоит') || t.includes('сколько')) return 'Консультация бесплатно, чистка 3 000 ₽, лечение кариеса от 4 500 ₽, имплантация от 35 000 ₽. Что вас интересует?';
-  if(t.includes('болит')) return 'Сочувствую. Сегодня есть свободное время у терапевта в 14:00 и 16:00. Если боль сильная, лучше прийти пораньше. Записать вас на 14:00?';
-  return 'Пока я демо-версия и понимаю только простые вопросы про цены, запись и адрес. Скоро здесь будет настоящий ИИ-администратор.';
+  const res = await fetch(ZOYA_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+    body: JSON.stringify({ session_id: sessionId, message: text })
+  });
+  if(!res.ok) throw new Error('Зоя ответила ошибкой ' + res.status);
+  const data = await res.json();
+  if(data.session_id){
+    sessionId = data.session_id;
+    try { sessionStorage.setItem('zoya_session', sessionId); } catch(e) {}
+  }
+  return data.reply;
 }
 
 async function send(text){
   text = text.trim();
   if(!text) return;
+  if(busy) return;
+  busy = true;
+  sendBtn.disabled = true;
+  document.getElementById('quick').hidden = true;
   addMsg(text, 'me');
   input.value = '';
   const typing = addMsg('Зоя печатает…', 'bot typing');
@@ -275,8 +290,13 @@ async function send(text){
     typing.remove();
     addMsg(reply, 'bot');
   }catch(e){
+    console.error(e);
     typing.remove();
-    addMsg('Не получилось отправить сообщение. Проверьте интернет и попробуйте ещё раз.', 'bot');
+    addMsg('Не получилось отправить сообщение. Проверьте интернет и попробуйте ещё раз или позвоните нам: +7 (495) 000-12-34.', 'bot');
+  }finally{
+    busy = false;
+    sendBtn.disabled = false;
+    input.focus();
   }
 }
 document.getElementById('chat-form').addEventListener('submit', e => { e.preventDefault(); send(input.value); });
