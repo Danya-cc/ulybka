@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Стоматология «Улыбка»</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: светлая клиника — шапка, герой со списком приёма, услуги-прайс, врачи, контакты; чат плавает справа внизу */
+:root{
+  --bg:#F4F7F7; --surface:#FFFFFF; --ink:#0F2B2A; --muted:#55706E; --line:#DCE6E5;
+  --accent:#0E7C6B; --accent-ink:#FFFFFF; --accent-soft:#DDF1EC; --bubble:#EEF3F2;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0C1716; --surface:#13211F; --ink:#E6F0EE; --muted:#93AAA7; --line:#22332F;
+  --accent:#3CC2A6; --accent-ink:#06201B; --accent-soft:#163A33; --bubble:#1B2C29; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0C1716; --surface:#13211F; --ink:#E6F0EE; --muted:#93AAA7; --line:#22332F;
+  --accent:#3CC2A6; --accent-ink:#06201B; --accent-soft:#163A33; --bubble:#1B2C29; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1080px;margin:0 auto}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+a{color:inherit}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:13px 22px;
+  background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:20px;border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:20px}
+.logo svg{flex:none}
+.head-contacts{display:flex;gap:20px;flex-wrap:wrap;align-items:center;font-size:14px;color:var(--muted)}
+.head-contacts b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+
+.hero{display:grid;grid-template-columns:1.25fr 1fr;gap:40px;padding-block:56px 48px;align-items:start}
+.hero h1{font-size:clamp(30px,5vw,50px);font-weight:700}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero p{color:var(--muted);max-width:52ch;font-size:18px;margin:18px 0 28px}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+.today{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px}
+.today{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.fact{display:flex;flex-direction:column;gap:4px;padding:16px 14px}
+.fact:nth-child(-n+2){border-bottom:1px solid var(--line)}
+.fact:nth-child(odd){border-right:1px solid var(--line)}
+.fact b{font-family:var(--display);font-weight:500;font-size:26px;color:var(--accent);font-variant-numeric:tabular-nums}
+.fact span{font-size:14px;color:var(--muted);line-height:1.4}
+
+section{padding-block:48px;border-top:1px solid var(--line)}
+.sec-head{display:flex;justify-content:space-between;align-items:end;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.sec-head h2{font-size:clamp(22px,3vw,30px);font-weight:500}
+
+.price{width:100%;border-collapse:collapse;font-size:16px}
+.price td{padding:14px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.price td:last-child{text-align:right;white-space:nowrap;font-weight:700;font-variant-numeric:tabular-nums}
+.price .note{display:block;color:var(--muted);font-size:14px}
+
+.doctors{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.doc{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:6px}
+.avatar{width:52px;height:52px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-family:var(--display);font-weight:700;margin-bottom:8px}
+.doc h3{font-size:16px;font-weight:500}
+.doc p{margin:0;color:var(--muted);font-size:14px}
+
+.contacts{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+.contacts dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:10px 20px;font-size:15px}
+.contacts dt{color:var(--muted)}
+.contacts dd{margin:0;font-variant-numeric:tabular-nums}
+form.lead{display:flex;flex-direction:column;gap:12px}
+form.lead input{width:100%;padding:13px 16px;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+form.lead .err{color:#C2412D;font-size:13px;min-height:1em}
+form.lead .ok{color:var(--accent);font-weight:600}
+
+footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+/* Чат */
+.chat-fab{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:20;
+  box-shadow:0 8px 24px rgba(10,60,52,.25)}
+.chat{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:21;
+  width:min(370px,calc(100vw - 32px));height:min(540px,calc(100vh - 120px));background:var(--surface);border:1px solid var(--line);
+  border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(10,40,36,.22)}
+.chat-top{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.chat-top .avatar{width:40px;height:40px;margin:0;font-size:14px}
+.chat-top b{display:block;font-size:15px}
+.chat-top small{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px}
+.chat-top small::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.chat-close{margin-left:auto;background:none;border:0;cursor:pointer;font-size:22px;color:var(--muted);line-height:1;padding:4px 8px}
+.msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.m.bot{background:var(--bubble);border-bottom-left-radius:4px;align-self:flex-start}
+.m.me{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px;align-self:flex-end}
+.m.typing{color:var(--muted);font-style:italic}
+.quick{display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px}
+.quick button{border:1px solid var(--line);background:none;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.chat form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
+.chat input{flex:1;min-width:0;padding:11px 14px;border-radius:999px;border:1px solid var(--line);background:var(--bg)}
+.chat form .btn{padding:11px 16px}
+
+@media (max-width:760px){
+  .hero,.contacts{grid-template-columns:1fr}
+  .doctors{grid-template-columns:1fr}
+  .hero{padding-block:36px}
+}
+@media (prefers-reduced-motion:no-preference){.chat:not([hidden]){animation:pop .18s ease-out}
+  @keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 4c-3 0-5 3-5 7 0 5 2 7 3 11 1 4 2 7 4 7s2-4 3-7c.5-2 1.5-3 3-3s2.5 1 3 3c1 3 1 7 3 7s3-3 4-7c1-4 3-6 3-11 0-4-2-7-5-7-3 0-4 2-8 2S11 4 8 4z" fill="var(--accent)"/></svg>
+      Улыбка
+    </div>
+    <div class="head-contacts">
+      <span>ул. Садовая, 12 · м. Парковая</span>
+      <span>Ежедневно 9:00–21:00</span>
+      <b>+7 (495) 000-12-34</b>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Семейная стоматология</div>
+      <h1 style="margin-top:12px">Лечим зубы <em>спокойно</em> и без очередей</h1>
+      <p>Терапия, хирургия и брекеты в одной клинике. Первая консультация бесплатно, приём по записи с точностью до 10 минут.</p>
+      <div class="hero-actions">
+        <button class="btn" type="button" data-open-chat="Хочу записаться на приём">Записаться онлайн</button>
+        <a class="btn ghost" href="#prices">Цены</a>
+      </div>
+    </div>
+    <aside class="today" aria-label="О клинике">
+      <div class="fact"><b>12 лет</b><span>принимаем пациентов на Садовой</span></div>
+      <div class="fact"><b>2 года</b><span>гарантия на пломбы и коронки</span></div>
+      <div class="fact"><b>0%</b><span>рассрочка на лечение до 12 месяцев</span></div>
+      <div class="fact"><b>4,9</b><span>средняя оценка на Яндекс Картах</span></div>
+    </aside>
+  </div>
+
+  <section id="prices">
+    <div class="sec-head"><h2>Услуги и цены</h2><span class="eyebrow">Цены в рублях</span></div>
+    <table class="price" id="price-table">
+      <tr><td>Консультация и осмотр<span class="note">с планом лечения</span></td><td>бесплатно</td></tr>
+      <tr><td>Профессиональная чистка<span class="note">ультразвук + Air Flow, 60 мин</span></td><td>3 000</td></tr>
+      <tr><td>Лечение кариеса<span class="note">с анестезией и пломбой</span></td><td>от 4 500</td></tr>
+      <tr><td>Удаление зуба<span class="note">простое</span></td><td>от 2 500</td></tr>
+      <tr><td>Отбеливание<span class="note">кабинетное, 1 визит</span></td><td>12 000</td></tr>
+      <tr><td>Имплантация<span class="note">под ключ, с коронкой</span></td><td>от 35 000</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Врачи</h2></div>
+    <div class="doctors" id="doctors">
+      <div class="doc"><div class="avatar">АИ</div><h3>Анна Иванова</h3><p>Терапевт, стаж 12 лет</p><p>Кариес, чистка, отбеливание</p></div>
+      <div class="doc"><div class="avatar">ДП</div><h3>Дмитрий Петров</h3><p>Хирург-имплантолог, стаж 15 лет</p><p>Удаление, имплантация</p></div>
+      <div class="doc"><div class="avatar">ЕС</div><h3>Елена Смирнова</h3><p>Ортодонт, стаж 9 лет</p><p>Брекеты и элайнеры</p></div>
+    </div>
+  </section>
+
+  <section id="contacts">
+    <div class="contacts">
+      <div>
+        <div class="sec-head"><h2>Контакты</h2></div>
+        <dl>
+          <dt>Адрес</dt><dd>ул. Садовая, 12, 2 этаж</dd>
+          <dt>Метро</dt><dd>Парковая, 5 минут пешком</dd>
+          <dt>Часы</dt><dd>Ежедневно 9:00–21:00</dd>
+          <dt>Телефон</dt><dd>+7 (495) 000-12-34</dd>
+        </dl>
+      </div>
+      <div>
+        <div class="sec-head"><h2>Перезвоним вам</h2></div>
+        <form class="lead" id="lead" novalidate>
+          <input id="lead-name" placeholder="Ваше имя" autocomplete="name">
+          <input id="lead-phone" placeholder="Телефон" inputmode="tel" autocomplete="tel">
+          <div class="err" id="lead-err"></div>
+          <button class="btn" type="submit" style="align-self:flex-start">Оставить заявку</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>© 2026 Стоматология «Улыбка»</span>
+    <span>Демо-сайт: клиника и данные вымышленные · <span id="data-source">данные встроены в страницу</span></span>
+  </footer>
+</div>
+
+<button class="btn chat-fab" id="chat-fab" type="button" aria-expanded="false" aria-controls="chat">Написать администратору</button>
+
+<div class="chat" id="chat" hidden role="dialog" aria-label="Чат с администратором">
+  <div class="chat-top">
+    <div class="avatar">З</div>
+    <div><b>Зоя, администратор</b><small>онлайн</small></div>
+    <button class="chat-close" id="chat-close" type="button" aria-label="Закрыть чат">×</button>
+  </div>
+  <div class="msgs" id="msgs" aria-live="polite"></div>
+  <div class="quick" id="quick">
+    <button type="button">Сколько стоит чистка?</button>
+    <button type="button">Хочу записаться</button>
+    <button type="button">Где вы находитесь?</button>
+  </div>
+  <form id="chat-form">
+    <input id="chat-input" placeholder="Напишите сообщение…" autocomplete="off">
+    <button class="btn" type="submit" aria-label="Отправить">→</button>
+  </form>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const fab = document.getElementById('chat-fab');
+const msgs = document.getElementById('msgs');
+const input = document.getElementById('chat-input');
+let greeted = false;
+
+function addMsg(text, who){
+  const d = document.createElement('div');
+  d.className = 'm ' + who;
+  d.textContent = text;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+  return d;
+}
+
+function openChat(prefill){
+  chat.hidden = false;
+  fab.setAttribute('aria-expanded','true');
+  if(!greeted){ addMsg('Здравствуйте! Я Зоя, администратор клиники «Улыбка». Подскажу по ценам и запишу на приём.', 'bot'); greeted = true; }
+  if(prefill) send(prefill); else input.focus();
+}
+function closeChat(){ chat.hidden = true; fab.setAttribute('aria-expanded','false'); fab.focus(); }
+
+fab.addEventListener('click', () => chat.hidden ? openChat() : closeChat());
+document.getElementById('chat-close').addEventListener('click', closeChat);
+document.querySelectorAll('[data-open-chat]').forEach(b => b.addEventListener('click', () => openChat(b.dataset.openChat)));
+document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', () => send(b.textContent)));
+
+/*
+  ЗАГЛУШКА. Сейчас ответы придуманы прямо здесь, по ключевым словам.
+  На следующем шаге эта функция будет отправлять сообщение в Supabase Edge Function:
+    const res = await fetch('https://<проект>.supabase.co/functions/v1/zoya', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id, message: text })
+    });
+    return (await res.json()).reply;
+*/
+async function askManager(text){
+  await new Promise(r => setTimeout(r, 700));
+  const t = text.toLowerCase();
+  if(t.includes('чистк')) return 'Профессиональная чистка стоит 3 000 ₽ и занимает около часа. Сегодня свободно в 14:00 и 16:00 у доктора Ивановой. Записать вас?';
+  if(t.includes('запис')) return 'С радостью запишу. Подскажите, пожалуйста, какая услуга нужна и в какой день вам удобно?';
+  if(t.includes('где') || t.includes('адрес')) return 'Мы на ул. Садовой, 12, 2 этаж, в 5 минутах от метро «Парковая». Работаем ежедневно с 9:00 до 21:00.';
+  if(t.includes('цен') || t.includes('стоит') || t.includes('сколько')) return 'Консультация бесплатно, чистка 3 000 ₽, лечение кариеса от 4 500 ₽, имплантация от 35 000 ₽. Что вас интересует?';
+  if(t.includes('болит')) return 'Сочувствую. Сегодня есть свободное время у терапевта в 14:00 и 16:00. Если боль сильная, лучше прийти пораньше. Записать вас на 14:00?';
+  return 'Пока я демо-версия и понимаю только простые вопросы про цены, запись и адрес. Скоро здесь будет настоящий ИИ-администратор.';
+}
+
+async function send(text){
+  text = text.trim();
+  if(!text) return;
+  addMsg(text, 'me');
+  input.value = '';
+  const typing = addMsg('Зоя печатает…', 'bot typing');
+  try{
+    const reply = await askManager(text);
+    typing.remove();
+    addMsg(reply, 'bot');
+  }catch(e){
+    typing.remove();
+    addMsg('Не получилось отправить сообщение. Проверьте интернет и попробуйте ещё раз.', 'bot');
+  }
+}
+document.getElementById('chat-form').addEventListener('submit', e => { e.preventDefault(); send(input.value); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && !chat.hidden) closeChat(); });
+
+/* ================= ПОДКЛЮЧЕНИЕ К БАЗЕ (Supabase) =================
+   Сайт общается с базой через REST API: обычные HTTP-запросы.
+   Публичный ключ (publishable) можно хранить в коде сайта: он даёт только то,
+   что разрешили правила RLS — читать услуги и врачей, добавлять заявки. */
+const SUPABASE_URL = 'https://jeaqmrzudzaazhzrnnzh.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_UVXT546-AEnPp61vgYmYLg_ocuKUOym';
+
+async function db(path, options = {}){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    ...options,
+    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...(options.headers || {}) }
+  });
+  if(!res.ok) throw new Error('База ответила ошибкой ' + res.status + ': ' + await res.text());
+  return res.status === 204 || res.status === 201 ? null : res.json();
+}
+
+const rub = n => n.toLocaleString('ru-RU');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function years(n){ const a=n%10, b=n%100; return n + (a===1&&b!==11?' год':a>=2&&a<=4&&(b<12||b>14)?' года':' лет'); }
+
+async function loadFromDatabase(){
+  try{
+    // GET /rest/v1/services?select=...&order=id  — то же самое, что SELECT ... FROM services ORDER BY id
+    const services = await db('services?select=name,description,price,price_is_from,duration_min&order=id');
+    document.getElementById('price-table').innerHTML = services.map(s => {
+      const price = s.price === 0 ? 'бесплатно' : (s.price_is_from ? 'от ' : '') + rub(s.price);
+      return `<tr><td>${esc(s.name)}<span class="note">${esc(s.description)}, ${s.duration_min} мин</span></td><td>${price}</td></tr>`;
+    }).join('');
+
+    const doctors = await db('doctors?select=full_name,specialty,experience_years,description&order=id');
+    document.getElementById('doctors').innerHTML = doctors.map(d => {
+      const initials = d.full_name.split(' ').map(w => w[0]).join('');
+      const role = d.specialty[0].toUpperCase() + d.specialty.slice(1);
+      return `<div class="doc"><div class="avatar">${esc(initials)}</div><h3>${esc(d.full_name)}</h3><p>${esc(role)}, стаж ${years(d.experience_years)}</p><p>${esc(d.description)}</p></div>`;
+    }).join('');
+
+    document.getElementById('data-source').textContent = 'данные загружены из базы';
+  }catch(e){
+    // Если база недоступна, на странице остаются встроенные цены и врачи
+    console.warn('Не удалось загрузить данные из базы, показываю встроенные:', e);
+  }
+}
+loadFromDatabase();
+
+const lead = document.getElementById('lead');
+lead.addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = document.getElementById('lead-name').value.trim();
+  const phone = document.getElementById('lead-phone').value.replace(/\D/g,'');
+  const err = document.getElementById('lead-err');
+  const btn = lead.querySelector('button');
+  if(!name){ err.textContent = 'Укажите имя.'; return; }
+  if(phone.length < 10 || phone.length > 15){ err.textContent = 'Укажите телефон: от 10 до 15 цифр.'; return; }
+  err.textContent = '';
+  btn.disabled = true; btn.textContent = 'Отправляем…';
+  try{
+    // POST /rest/v1/leads  — то же самое, что INSERT INTO leads (...) VALUES (...)
+    await db('leads', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },   // ответ не нужен, да и прочитать заявку сайту нельзя
+      body: JSON.stringify({ name, phone, source: 'form' })
+    });
+    lead.innerHTML = '<p class="ok">Спасибо, ' + esc(name) + '! Администратор перезвонит в течение 15 минут.</p>';
+  }catch(ex){
+    console.error(ex);
+    err.textContent = 'Не получилось отправить заявку. Позвоните нам: +7 (495) 000-12-34.';
+    btn.disabled = false; btn.textContent = 'Оставить заявку';
+  }
+});
+['lead-name','lead-phone'].forEach(id => document.getElementById(id).addEventListener('input', () => document.getElementById('lead-err').textContent = ''));
+</script>
+</body>
+</html>
