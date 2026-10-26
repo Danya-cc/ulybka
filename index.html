@@ -93,6 +93,9 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
 .chat-top b{display:block;font-size:15px}
 .chat-top small{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px}
 .chat-top small::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.chat-new{margin-left:auto;background:none;border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.chat-new:hover{color:var(--ink);border-color:var(--muted)}
+.chat-new:not([hidden]) + .chat-close{margin-left:0}
 .chat-close{margin-left:auto;background:none;border:0;cursor:pointer;font-size:22px;color:var(--muted);line-height:1;padding:4px 8px}
 .msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
 .m{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -205,7 +208,8 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
 <div class="chat" id="chat" hidden role="dialog" aria-label="Чат с администратором">
   <div class="chat-top">
     <div class="avatar">З</div>
-    <div><b>Зоя, администратор</b><small>онлайн</small></div>
+    <div><b>Зоя</b><small>администратор · онлайн</small></div>
+    <button class="chat-new" id="chat-new" type="button" hidden>Новый диалог</button>
     <button class="chat-close" id="chat-close" type="button" aria-label="Закрыть чат">×</button>
   </div>
   <div class="msgs" id="msgs" aria-live="polite"></div>
@@ -239,10 +243,12 @@ function addMsg(text, who){
   return d;
 }
 
+const GREETING = 'Здравствуйте! Я Зоя, администратор клиники «Улыбка». Подскажу по ценам, запишу на приём или перенесу запись.';
+
 function openChat(prefill){
   chat.hidden = false;
   fab.setAttribute('aria-expanded','true');
-  if(!greeted){ addMsg('Здравствуйте! Я Зоя, администратор клиники «Улыбка». Подскажу по ценам и запишу на приём.', 'bot'); greeted = true; }
+  if(!greeted){ addMsg(GREETING, 'bot'); greeted = true; }
   if(prefill) send(prefill); else input.focus();
 }
 function closeChat(){ chat.hidden = true; fab.setAttribute('aria-expanded','false'); fab.focus(); }
@@ -271,9 +277,44 @@ async function askManager(text){
   if(data.session_id){
     sessionId = data.session_id;
     try { sessionStorage.setItem('zoya_session', sessionId); } catch(e) {}
+    document.getElementById('chat-new').hidden = false;
   }
   return data.reply;
 }
+
+// Если Зоя помнит разговор, пациент должен его видеть: восстанавливаем переписку на экране
+async function restoreHistory(){
+  if(!sessionId) return;
+  try{
+    const res = await fetch(ZOYA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+      body: JSON.stringify({ action: 'history', session_id: sessionId })
+    });
+    const data = await res.json();
+    if(!data.messages || !data.messages.length) return;
+    msgs.innerHTML = '';
+    addMsg(GREETING, 'bot');
+    data.messages.forEach(m => addMsg(m.text, m.role === 'user' ? 'me' : 'bot'));
+    greeted = true;
+    document.getElementById('quick').hidden = true;
+    document.getElementById('chat-new').hidden = false;
+  }catch(e){ console.warn('Не удалось восстановить переписку', e); }
+}
+
+// Новый диалог: Зоя забывает этот разговор, на экране — чистое окно
+function newChat(){
+  if(busy) return;
+  sessionId = null;
+  try { sessionStorage.removeItem('zoya_session'); } catch(e) {}
+  msgs.innerHTML = '';
+  addMsg(GREETING, 'bot');
+  greeted = true;
+  document.getElementById('quick').hidden = false;
+  document.getElementById('chat-new').hidden = true;
+  input.focus();
+}
+document.getElementById('chat-new').addEventListener('click', newChat);
 
 async function send(text){
   text = text.trim();
@@ -372,6 +413,8 @@ lead.addEventListener('submit', async e => {
   }
 });
 ['lead-name','lead-phone'].forEach(id => document.getElementById(id).addEventListener('input', () => document.getElementById('lead-err').textContent = ''));
+
+restoreHistory();   // в самом конце: к этому моменту все константы уже объявлены
 </script>
 </body>
 </html>

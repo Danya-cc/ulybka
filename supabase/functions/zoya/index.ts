@@ -52,17 +52,28 @@ function systemPrompt(): string {
 1. Рассказывать об услугах, ценах и врачах. Всегда бери цены и врачей из инструмента get_services, не по памяти.
 2. Подбирать свободное время через get_free_slots. Предлагай 2–3 варианта, а не весь список.
 3. Записывать на приём через book_appointment.
-4. Оставлять заявку на звонок администратора через create_lead.
+4. Переносить и отменять записи, сделанные в этом же чате (get_my_appointments, reschedule_appointment, cancel_appointment).
+5. Оставлять заявку на звонок администратора через create_lead.
+
+Имена и названия:
+- Называй врачей и услуги точно так, как они записаны в базе (например, «Анна Иванова», а не «Анна Ивановна»), даже если пациент написал иначе.
 
 Как записывать:
 - Выясни по очереди: услугу, удобный день и время, затем имя и телефон. Задавай один вопрос за раз.
+- Если пациент назвал день, но не сказал, в какое время ему удобно, сначала спроси: «Вам удобнее утром, днём или вечером?». Утро — до 12:00, день — с 12:00 до 17:00, вечер — с 17:00.
+- Если имя и телефон пациент уже называл в этом чате, не спрашивай их снова, но обязательно покажи их при подтверждении.
 - Если пациент не знает, какая услуга нужна (например, «болит зуб»), записывай на «Консультацию и осмотр» к терапевту или предложи лечение кариеса у терапевта.
 - Перед записью обязательно повтори одним сообщением: услугу, врача, дату и время, имя и телефон, и спроси «Всё верно?». Вызывай book_appointment только после явного согласия.
 - После записи подтверди её и напомни адрес. Попроси прийти за 10 минут.
 - Если время уже заняли, извинись и сразу предложи ближайшие свободные варианты.
 
+Перенос и отмена:
+- Сначала вызови get_my_appointments: он покажет записи, сделанные в этом чате.
+- Если нужная запись там есть: для переноса подбери новое время через get_free_slots, повтори «было → станет» и после согласия вызови reschedule_appointment; для отмены переспроси и после согласия вызови cancel_appointment.
+- Если записи в этом чате нет (пациент записывался по телефону, в другой день или в другом окне), ты не можешь проверить, что это его запись. Тогда оформи заявку через create_lead: администратор перезвонит и всё сделает.
+
 Когда создавать заявку (create_lead), а не записывать:
-- пациент хочет отменить или перенести запись (сама ты отменять записи не умеешь);
+- перенос или отмена записи, сделанной не в этом чате;
 - запись ребёнка, сложный план лечения, вопрос о стоимости комплексного лечения;
 - жалоба или недовольство;
 - пациент просит, чтобы ему перезвонили.
@@ -125,8 +136,34 @@ const TOOLS = [
     },
   },
   {
+    name: "get_my_appointments",
+    description: "Активные будущие записи, которые пациент сделал в ЭТОМ чате: appointment_id, услуга, врач, дата, время, имя, телефон.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "reschedule_appointment",
+    description: "Перенести запись из этого чата на другое свободное время (услуга та же). Вызывать только после согласия пациента. Если новое время недоступно, старая запись остаётся.",
+    input_schema: {
+      type: "object",
+      properties: {
+        appointment_id: { type: "integer", description: "appointment_id из get_my_appointments" },
+        new_slot_id: { type: "integer", description: "slot_id нового времени из get_free_slots" },
+      },
+      required: ["appointment_id", "new_slot_id"],
+    },
+  },
+  {
+    name: "cancel_appointment",
+    description: "Отменить запись из этого чата. Вызывать только после того, как пациент подтвердил отмену.",
+    input_schema: {
+      type: "object",
+      properties: { appointment_id: { type: "integer", description: "appointment_id из get_my_appointments" } },
+      required: ["appointment_id"],
+    },
+  },
+  {
     name: "create_lead",
-    description: "Создать заявку, чтобы администратор перезвонил пациенту: отмена или перенос записи, сложный вопрос, жалоба, просьба перезвонить.",
+    description: "Создать заявку, чтобы администратор перезвонил пациенту: отмена или перенос записи, сделанной НЕ в этом чате, сложный вопрос, жалоба, просьба перезвонить.",
     input_schema: {
       type: "object",
       properties: {
@@ -148,6 +185,10 @@ const DB_ERRORS: Record<string, string> = {
   SLOT_BELONGS_TO_OTHER_DOCTOR: "Слот принадлежит другому врачу. Заново найди время через get_free_slots.",
   INVALID_PHONE: "Телефон указан неверно. Попроси пациента указать номер полностью, например +7 999 123-45-67.",
   INVALID_NAME: "Имя не указано. Уточни, как зовут пациента.",
+  APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не в этом чате, менять её нельзя. Оформи заявку администратору через create_lead.",
+  APPOINTMENT_NOT_ACTIVE: "Эта запись уже отменена или завершена.",
+  APPOINTMENT_IN_PAST: "Время этой записи уже прошло.",
+  SAME_SLOT: "Пациент уже записан на это время.",
 };
 const explain = (msg: string) => {
   const code = Object.keys(DB_ERRORS).find((k) => msg.includes(k));
@@ -199,6 +240,28 @@ async function runTool(name: string, input: any, sessionId: string): Promise<{ c
       return { content: "Запись создана: " + JSON.stringify(data) };
     }
 
+    if (name === "get_my_appointments") {
+      const { data, error } = await db.rpc("get_session_appointments", { p_session_id: sessionId });
+      if (error) throw error;
+      return { content: data.length ? JSON.stringify(data) : "В этом чате нет активных записей." };
+    }
+
+    if (name === "reschedule_appointment") {
+      const { data, error } = await db.rpc("reschedule_appointment", {
+        p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_session_id: sessionId,
+      });
+      if (error) throw error;
+      return { content: "Запись перенесена: " + JSON.stringify(data) };
+    }
+
+    if (name === "cancel_appointment") {
+      const { data, error } = await db.rpc("cancel_appointment", {
+        p_appointment_id: input.appointment_id, p_session_id: sessionId,
+      });
+      if (error) throw error;
+      return { content: "Запись отменена: " + JSON.stringify(data) };
+    }
+
     if (name === "create_lead") {
       const { error } = await db.from("leads").insert({
         name: String(input.name).slice(0, 100),
@@ -248,6 +311,20 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
+
+  // История для сайта: показываем только то, что видел пациент (без вызовов инструментов)
+  if (body?.action === "history") {
+    const sid = typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id) ? body.session_id : null;
+    if (!sid) return json({ messages: [] });
+    const { data } = await db.from("messages").select("role, content").eq("session_id", sid).order("id");
+    const visible = (data ?? []).flatMap((m: any) => {
+      if (typeof m.content === "string") return [{ role: m.role, text: m.content }];
+      if (m.role !== "assistant") return [];
+      const t = m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
+      return t ? [{ role: "assistant", text: t }] : [];
+    });
+    return json({ messages: visible });
+  }
 
   const text = String(body?.message ?? "").trim();
   if (!text) return json({ error: "Пустое сообщение" }, 400);
