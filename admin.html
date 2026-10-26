@@ -326,7 +326,13 @@ $('grid').addEventListener('click', async e => {
   const status = b.dataset.act === 'cancel' ? 'cancelled' : b.dataset.act;
   b.disabled = true;
   const { error } = await sb.from('appointments').update({ status }).eq('id', b.dataset.id);
-  if(error){ b.disabled = false; b.textContent = 'Ошибка'; console.error(error); return; }
+  if(error){
+    console.error(error);
+    b.disabled = false; b.textContent = 'Не получилось';
+    const note = document.createElement('div'); note.className = 'err'; note.style.fontSize = '12px';
+    note.textContent = 'Ошибка: ' + error.message; b.closest('.cell').appendChild(note);
+    return;
+  }
   loadDay();
 });
 
