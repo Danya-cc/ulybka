@@ -1,5 +1,6 @@
 // Служебная функция для автотестов Зои (evals/run.mjs).
 // action "cleanup": снимает записи, сделанные в тестовых диалогах, удаляет тестовые заявки и пациентов.
+// action "verified_session": создаёт диалог, где личность «подтверждена» для тестового пациента.
 // Доступ — только с ключом автотестов (в базе хранится лишь его SHA-256).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -26,6 +27,12 @@ Deno.serve(async (req) => {
     const { data, error } = await db.rpc("cleanup_eval_data");
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true, removed: data });
+  }
+  // Подтверждённый тестовый пациент «Тест Памятин» с сохранённым пожеланием — для тестов памяти
+  if (body.action === "verified_session") {
+    const { data, error } = await db.rpc("eval_verified_session");
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, ...data });
   }
   return json({ error: "Unknown action" }, 400);
 });

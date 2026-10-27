@@ -111,6 +111,11 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
 .chat input{flex:1;min-width:0;padding:11px 14px;border-radius:999px;border:1px solid var(--line);background:var(--bg)}
 .chat form .btn{padding:11px 16px}
 .chat form{padding-bottom:6px}
+.who-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 16px 6px;font-size:12px;color:var(--muted)}
+.who-bar button{border:1px solid var(--line);background:none;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer;color:var(--ink);font-weight:600}
+.who-bar button.tg{border-color:#2AABEE;color:#1C8BC4}
+.who-bar button:hover{border-color:var(--muted)}
+.who-bar b{color:var(--ink)}
 .consent{margin:0;padding:0 16px 12px;font-size:11px;line-height:1.4;color:var(--muted)}
 .chat form .btn:disabled{opacity:.5;cursor:default}
 
@@ -225,6 +230,7 @@ footer{padding-block:28px 110px;border-top:1px solid var(--line);color:var(--mut
     <input id="chat-input" placeholder="Напишите сообщение…" autocomplete="off">
     <button class="btn" type="submit" aria-label="Отправить">→</button>
   </form>
+  <div class="who-bar" id="who-bar"></div>
   <p class="consent">Отправляя сообщение, вы соглашаетесь на обработку персональных данных. Зоя — ИИ-ассистент клиники.</p>
 </div>
 
@@ -279,18 +285,6 @@ const ZOYA_URL = 'https://jeaqmrzudzaazhzrnnzh.supabase.co/functions/v1/zoya';
 let sessionId = null;
 try { sessionId = sessionStorage.getItem('zoya_session'); } catch(e) {}
 
-// Все диалоги этого браузера (до 20 последних). По ним Зоя находит записи пациента,
-// даже если он начал новый диалог или вернулся на сайт на следующий день.
-function knownSessions(){
-  try { return JSON.parse(localStorage.getItem('zoya_known_sessions') || '[]'); } catch(e) { return []; }
-}
-function rememberSession(id){
-  try {
-    const list = [id, ...knownSessions().filter(x => x !== id)].slice(0, 20);
-    localStorage.setItem('zoya_known_sessions', JSON.stringify(list));
-  } catch(e) {}
-}
-
 // Личная ссылка из напоминания Лиды (страница записи → «Перенести»): даёт Зое доступ к записям этого пациента
 function apptToken(){
   try { return sessionStorage.getItem('zoya_appt') || null; } catch(e) { return null; }
@@ -300,18 +294,94 @@ async function askManager(text){
   const res = await fetch(ZOYA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-    body: JSON.stringify({ session_id: sessionId, message: text, known_sessions: knownSessions(), appt_token: apptToken() })
+    body: JSON.stringify({ session_id: sessionId, message: text, appt_token: apptToken() })
   });
   if(!res.ok) throw new Error('Зоя ответила ошибкой ' + res.status);
   const data = await res.json();
   if(data.session_id){
-    sessionId = data.session_id;
-    rememberSession(sessionId);
-    try { sessionStorage.setItem('zoya_session', sessionId); } catch(e) {}
+    setSession(data.session_id);
     document.getElementById('chat-new').hidden = false;
   }
   return data.reply;
 }
+
+function setSession(id){
+  sessionId = id;
+  try { sessionStorage.setItem('zoya_session', id); } catch(e) {}
+}
+
+/* ================= ВХОД ЧЕРЕЗ TELEGRAM =================
+   Зоя видит записи и память пациента только после подтверждения личности:
+   кнопка → ссылка на Лиду в Telegram → «Это вы входите?» → «Да» → чат подтверждён.
+   Так за общим компьютером никто не увидит чужие записи. */
+const whoBar = document.getElementById('who-bar');
+let loginPoll = null;
+
+function renderWho(state, name){
+  if(state === 'in'){
+    whoBar.innerHTML = '';
+    whoBar.append('Вы вошли как ', Object.assign(document.createElement('b'), { textContent: name }), ' ·');
+    const out = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Выйти' });
+    out.addEventListener('click', logout);
+    whoBar.append(out);
+  } else if(state === 'waiting'){
+    whoBar.innerHTML = '';
+    whoBar.append('Подтвердите вход в Telegram…');
+    const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Отмена' });
+    cancel.addEventListener('click', () => { stopLogin(); renderWho('out'); });
+    whoBar.append(cancel);
+  } else {
+    whoBar.innerHTML = '';
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'tg', textContent: 'Войти через Telegram' });
+    b.addEventListener('click', startLogin);
+    whoBar.append(b, 'чтобы я видела ваши записи');
+  }
+}
+function stopLogin(){ if(loginPoll){ clearInterval(loginPoll); loginPoll = null; } }
+
+async function zoyaAction(payload){
+  const res = await fetch(ZOYA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY }, body: JSON.stringify(payload) });
+  return res.json();
+}
+
+async function startLogin(){
+  const tab = window.open('', '_blank');           // открываем вкладку сразу по клику, иначе браузер её заблокирует
+  try{
+    const data = await zoyaAction({ action: 'tg_login_start', session_id: sessionId });
+    if(!data.link) throw new Error(data.error || 'нет ссылки');
+    setSession(data.session_id);
+    if(tab) tab.location = data.link; else location.href = data.link;
+    renderWho('waiting');
+    const started = Date.now();
+    stopLogin();
+    loginPoll = setInterval(async () => {
+      if(Date.now() - started > 10 * 60 * 1000){ stopLogin(); renderWho('out'); return; }
+      const st = await zoyaAction({ action: 'tg_login_status', session_id: sessionId, token: data.token }).catch(() => null);
+      if(!st) return;
+      if(st.status === 'confirmed'){
+        stopLogin(); renderWho('in', st.name);
+        addMsg(`${st.name}, вы вошли. Теперь я вижу ваши записи и пожелания. Чем помочь?`, 'bot');
+        document.getElementById('chat-new').hidden = false;
+      } else if(st.status === 'rejected' || st.status === 'expired'){
+        stopLogin(); renderWho('out');
+      } else if(st.status === 'not_linked'){
+        stopLogin(); renderWho('out');
+        addMsg('Ваш Telegram пока не подключён к записи. Запишитесь у меня — после записи я пришлю ссылку, по которой Лида подключит напоминания, и тогда вход заработает.', 'bot');
+      }
+    }, 2000);
+  }catch(e){
+    if(tab) tab.close();
+    addMsg('Не получилось начать вход через Telegram. Попробуйте ещё раз или позвоните нам: +7 (495) 000-12-34.', 'bot');
+  }
+}
+
+// Выход = чистый новый диалог: следующий человек за этим компьютером не должен видеть прошлую переписку
+async function logout(){
+  await zoyaAction({ action: 'logout', session_id: sessionId }).catch(() => {});
+  newChat();
+  addMsg('Вы вышли. Прошлая переписка закрыта, ваши записи и пожелания в этом окне больше не видны.', 'bot');
+}
+renderWho('out');
 
 // Если Зоя помнит разговор, пациент должен его видеть: восстанавливаем переписку на экране
 async function restoreHistory(){
@@ -323,6 +393,7 @@ async function restoreHistory(){
       body: JSON.stringify({ action: 'history', session_id: sessionId })
     });
     const data = await res.json();
+    if(data.verified_name) renderWho('in', data.verified_name);
     if(!data.messages || !data.messages.length) return;
     msgs.innerHTML = '';
     addMsg(GREETING, 'bot');
@@ -338,6 +409,7 @@ function newChat(){
   if(busy) return;
   sessionId = null;
   try { sessionStorage.removeItem('zoya_session'); } catch(e) {}
+  stopLogin(); renderWho('out');   // новый диалог — снова «гость»: вход действует только в своём диалоге
   msgs.innerHTML = '';
   addMsg(GREETING, 'bot');
   greeted = true;

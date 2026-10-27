@@ -15,7 +15,7 @@ const MAX_TOOL_ROUNDS = 6;            // сколько раз подряд Зо
 const MAX_MESSAGE_LENGTH = 1000;      // максимальная длина сообщения пациента
 const MAX_USER_MESSAGES_PER_SESSION = 80;   // защита баланса API от ботов; живому пациенту с запасом
 const MAX_USER_MESSAGES_PER_10_MIN = 30;
-const MAX_KNOWN_SESSIONS = 20;              // сколько прошлых диалогов браузера учитывать
+const VERIFIED_HOURS = 12;                  // сколько действует вход через Telegram в одном диалоге
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -43,7 +43,7 @@ const MAIN_SECTION = "Основное";
 const EXTRA_SECTIONS = Object.keys(SECTIONS).filter((t) => t !== MAIN_SECTION);
 
 // ---------- Системный промпт ----------
-function systemPrompt(): string {
+function systemPrompt(patient: { id: number; name: string; via: string } | null): string {
   const now = new Date();
   const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Moscow", ...o }).format(now);
   const iso = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow" }).format(now); // YYYY-MM-DD
@@ -61,8 +61,9 @@ ${SECTIONS[MAIN_SECTION]}
 1. Рассказывать об услугах, ценах и врачах. Всегда бери цены и врачей из инструмента get_services, не по памяти.
 2. Подбирать свободное время через get_free_slots. Предлагай 2–3 варианта, а не весь список.
 3. Записывать на приём через book_appointment.
-4. Переносить и отменять записи, сделанные с этого устройства — в этом или прошлых чатах на сайте (get_my_appointments, reschedule_appointment, cancel_appointment). Если пациент пришёл по личной ссылке из напоминания в Telegram, get_my_appointments покажет и все его записи — с ними можно работать так же.
+4. Переносить и отменять записи (get_my_appointments, reschedule_appointment, cancel_appointment): записи, сделанные в этом диалоге, — всегда; остальные записи пациента — только если его личность подтверждена (см. «Кто с тобой говорит»).
 5. Оставлять заявку на звонок администратора через create_lead.
+6. Помнить о подтверждённом пациенте: get_patient_profile, remember_preference, forget_preferences (см. «Память»).
 
 Имена и названия:
 - Называй врачей и услуги точно так, как они записаны в базе (например, «Анна Иванова», а не «Анна Ивановна»), даже если пациент написал иначе.
@@ -79,9 +80,9 @@ ${SECTIONS[MAIN_SECTION]}
 - Если время уже заняли, извинись и сразу предложи ближайшие свободные варианты.
 
 Перенос и отмена:
-- Сначала вызови get_my_appointments: он покажет записи, сделанные в чате на сайте с этого устройства.
+- Сначала вызови get_my_appointments.
 - Если нужная запись там есть: для переноса подбери новое время через get_free_slots, повтори «было → станет» и после согласия вызови reschedule_appointment; для отмены переспроси и после согласия вызови cancel_appointment.
-- Если нужной записи там нет (пациент записывался по телефону или с другого устройства), ты не можешь проверить, что это его запись. Тогда оформи заявку через create_lead: администратор перезвонит и всё сделает.
+- Если нужной записи там нет и личность не подтверждена, ты не можешь проверить, что это его запись (за одним компьютером могут сидеть разные люди). Предложи: «Нажмите „Войти через Telegram“ под окном чата — после подтверждения я увижу ваши записи». Это работает, если Telegram подключали к напоминаниям после записи. Иначе — заявка через create_lead: администратор перезвонит и всё сделает.
 
 Когда создавать заявку (create_lead), а не записывать:
 - перенос или отмена записи, которой нет в get_my_appointments;
@@ -89,6 +90,13 @@ ${SECTIONS[MAIN_SECTION]}
 - жалоба или недовольство;
 - пациент просит, чтобы ему перезвонили.
 В комментарии к заявке кратко опиши суть вопроса. Скажи, что администратор перезвонит в течение 15 минут в рабочее время.
+
+Память:
+- Всё о пациенте хранится в базе клиники. Смотри это через get_patient_profile, когда пригодится: пациент хочет записаться («как обычно», «к моему врачу»), спрашивает о своих визитах, или нужно учесть его пожелания при подборе времени.
+- remember_preference — только если пациент сам явно сказал о постоянном пожелании: удобное время, удобные дни, любимый врач, как к нему обращаться. Разовое «завтра мне удобно в 15:00» — не постоянное пожелание, не сохраняй. После сохранения коротко скажи, что запомнила.
+- Никогда не запоминай ничего о здоровье: жалобы, диагнозы, аллергии, лекарства, беременность, страх лечения. На такую просьбу ответь, что это важно сказать врачу на приёме, а ты такие сведения не храни.
+- Если пациент просит забыть его пожелания — forget_preferences.
+- Если личность не подтверждена, у тебя нет доступа к памяти: не делай вид, что помнишь человека. Предложи войти через Telegram.
 
 Медицинские границы:
 - Ты не врач. Не ставь диагнозы, не называй причины симптомов, не советуй лекарства и дозировки.
@@ -104,7 +112,12 @@ ${SECTIONS[MAIN_SECTION]}
 Стиль:
 - Обращайся на «вы», тепло и по-деловому. Пиши коротко: 1–4 предложения.
 - Только обычный текст: без markdown, звёздочек, решёток и таблиц. Списки — простыми строками.
-- Даты пиши по-человечески: «в среду, 28 октября, в 14:00».`;
+- Даты пиши по-человечески: «в среду, 28 октября, в 14:00».
+
+Кто с тобой говорит:
+${patient
+    ? `Личность подтверждена (${patient.via}): пациент ${patient.name}. Ему доступны все его записи и память. Имя и телефон для записи бери из get_patient_profile, переспрашивать не нужно, но покажи их при подтверждении.`
+    : "Личность не подтверждена. Доступны только записи, сделанные в этом диалоге. Памяти о человеке нет."}`;
 }
 
 // ---------- Инструменты: описание для модели ----------
@@ -157,7 +170,7 @@ const TOOLS = [
   },
   {
     name: "get_my_appointments",
-    description: "Активные будущие записи, которые пациент сделал в чате на сайте с ЭТОГО устройства (в этом или прошлых диалогах): appointment_id, услуга, врач, дата, время, имя, телефон.",
+    description: "Активные будущие записи: сделанные в этом диалоге, а если личность подтверждена — все записи пациента. appointment_id, услуга, врач, дата, время.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -180,6 +193,29 @@ const TOOLS = [
       properties: { appointment_id: { type: "integer", description: "appointment_id из get_my_appointments" } },
       required: ["appointment_id"],
     },
+  },
+  {
+    name: "get_patient_profile",
+    description: "Только для подтверждённого пациента: имя, телефон, сколько было визитов, последний визит, обычный врач и время, будущие записи и сохранённые пожелания.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "remember_preference",
+    description: "Только для подтверждённого пациента: сохранить постоянное пожелание, которое пациент сам высказал. Никаких сведений о здоровье.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["preferred_time", "preferred_days", "preferred_doctor", "address_as"],
+          description: "preferred_time — удобное время; preferred_days — удобные дни; preferred_doctor — любимый врач; address_as — как обращаться" },
+        value: { type: "string", description: "Коротко, словами пациента: «после 18:00», «по субботам», «Анна Иванова», «Аня»" },
+      },
+      required: ["kind", "value"],
+    },
+  },
+  {
+    name: "forget_preferences",
+    description: "Только для подтверждённого пациента: удалить все сохранённые пожелания по его просьбе.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "create_lead",
@@ -205,7 +241,7 @@ const DB_ERRORS: Record<string, string> = {
   SLOT_BELONGS_TO_OTHER_DOCTOR: "Слот принадлежит другому врачу. Заново найди время через get_free_slots.",
   INVALID_PHONE: "Телефон указан неверно. Попроси пациента указать номер полностью, например +7 999 123-45-67.",
   INVALID_NAME: "Имя не указано. Уточни, как зовут пациента.",
-  APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не с этого устройства, менять её нельзя. Оформи заявку администратору через create_lead.",
+  APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не в этом диалоге, а личность не подтверждена. Предложи войти через Telegram или оформи заявку через create_lead.",
   APPOINTMENT_NOT_ACTIVE: "Эта запись уже отменена или завершена.",
   APPOINTMENT_IN_PAST: "Время этой записи уже прошло.",
   APPOINTMENT_NOT_FOUND: "Такой записи нет среди записей пациента. Проверь get_my_appointments.",
@@ -217,8 +253,8 @@ const explain = (msg: string) => {
 };
 
 // ---------- Инструменты: выполнение ----------
-// linkedPatient — пациент, пришедший по личной ссылке из напоминания (или null)
-async function runTool(name: string, input: any, sessionId: string, owned: string[], linkedPatient: number | null): Promise<{ content: string; is_error?: boolean }> {
+// patientId — подтверждённый пациент: вошёл через Telegram или пришёл по личной ссылке из напоминания (иначе null)
+async function runTool(name: string, input: any, sessionId: string, owned: string[], patientId: number | null): Promise<{ content: string; is_error?: boolean }> {
   try {
     if (name === "get_services") {
       const { data, error } = await db
@@ -281,19 +317,20 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
       const { data, error } = await db.rpc("get_session_appointments", { p_session_ids: owned });
       if (error) throw error;
       let list: any[] = data;
-      if (linkedPatient) {
-        const { data: own, error: e2 } = await db.rpc("patient_appointments", { p_patient_id: linkedPatient });
+      if (patientId) {
+        const { data: own, error: e2 } = await db.rpc("patient_appointments", { p_patient_id: patientId });
         if (e2) throw e2;
         const seen = new Set(list.map((a: any) => a.appointment_id));
         list = [...list, ...own.filter((a: any) => !seen.has(a.appointment_id))];
       }
-      return { content: list.length ? JSON.stringify(list) : "Записей, сделанных в чате с этого устройства, нет." };
+      return { content: list.length ? JSON.stringify(list)
+        : patientId ? "Будущих записей у пациента нет." : "В этом диалоге записей нет, а личность не подтверждена — другие записи не видны." };
     }
 
     if (name === "reschedule_appointment") {
-      if (linkedPatient) {
+      if (patientId) {
         const { data, error } = await db.rpc("patient_reschedule_appointment", {
-          p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_patient_id: linkedPatient,
+          p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_patient_id: patientId,
         });
         if (!error) return { content: "Запись перенесена: " + JSON.stringify(data) };
         if (!error.message.includes("APPOINTMENT_NOT_FOUND")) throw error; // не его запись — пробуем как запись из чата
@@ -306,8 +343,8 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
     }
 
     if (name === "cancel_appointment") {
-      if (linkedPatient) {
-        const { data, error } = await db.rpc("patient_cancel_appointment", { p_appointment_id: input.appointment_id, p_patient_id: linkedPatient });
+      if (patientId) {
+        const { data, error } = await db.rpc("patient_cancel_appointment", { p_appointment_id: input.appointment_id, p_patient_id: patientId });
         if (!error) return { content: "Запись отменена: " + JSON.stringify(data) };
         if (!error.message.includes("APPOINTMENT_NOT_FOUND")) throw error;
       }
@@ -316,6 +353,23 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
       });
       if (error) throw error;
       return { content: "Запись отменена: " + JSON.stringify(data) };
+    }
+
+    if (name === "get_patient_profile" || name === "remember_preference" || name === "forget_preferences") {
+      if (!patientId) return { content: "Личность не подтверждена: доступа к данным пациента нет. Предложи нажать «Войти через Telegram» под окном чата.", is_error: true };
+      if (name === "get_patient_profile") {
+        const { data, error } = await db.rpc("patient_profile", { p_patient_id: patientId });
+        if (error) throw error;
+        return { content: JSON.stringify(data) };
+      }
+      if (name === "remember_preference") {
+        const { data, error } = await db.rpc("remember_preference", { p_patient_id: patientId, p_kind: input.kind, p_value: String(input.value ?? "").slice(0, 200), p_session_id: sessionId });
+        if (error) throw error;
+        return { content: "Сохранено: " + JSON.stringify(data) };
+      }
+      const { data, error } = await db.rpc("forget_preferences", { p_patient_id: patientId });
+      if (error) throw error;
+      return { content: `Удалено пожеланий: ${data}` };
     }
 
     if (name === "create_lead") {
@@ -347,7 +401,7 @@ async function logCall(row: Record<string, unknown>): Promise<number> {
 }
 
 // ---------- Вызов Claude API ----------
-async function callClaude(messages: any[]) {
+async function callClaude(messages: any[], patient: { id: number; name: string; via: string } | null) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -358,7 +412,7 @@ async function callClaude(messages: any[]) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1024,
-      system: [{ type: "text", text: systemPrompt(), cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: systemPrompt(patient), cache_control: { type: "ephemeral" } }],
       tools: TOOLS,
       messages,
     }),
@@ -386,7 +440,36 @@ Deno.serve(async (req) => {
       const t = m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
       return t ? [{ role: "assistant", text: t }] : [];
     });
-    return json({ messages: visible });
+    const { data: sess } = await db.from("chat_sessions").select("verified_patient_id, verified_at, patients:verified_patient_id(full_name)").eq("id", sid).maybeSingle();
+    const verified = sess?.verified_patient_id && Date.now() - new Date(sess.verified_at).getTime() < VERIFIED_HOURS * 3600_000;
+    return json({ messages: visible, verified_name: verified ? String((sess as any).patients?.full_name ?? "").split(" ")[0] : null });
+  }
+
+  // Вход через Telegram: сайт получает ссылку на Лиду и опрашивает статус, пока пациент не подтвердит вход
+  if (body?.action === "tg_login_start" || body?.action === "tg_login_status" || body?.action === "logout") {
+    let sid = typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id) ? body.session_id : null;
+    if (sid) {
+      const { data } = await db.from("chat_sessions").select("id").eq("id", sid).maybeSingle();
+      if (!data) sid = null;
+    }
+    if (body.action === "logout") {
+      if (sid) await db.from("chat_sessions").update({ verified_patient_id: null, verified_at: null }).eq("id", sid);
+      return json({ ok: true });
+    }
+    if (body.action === "tg_login_status") {
+      if (!sid || typeof body.token !== "string") return json({ status: "expired" });
+      const { data } = await db.rpc("tg_login_status", { p_session_id: sid, p_token: body.token });
+      return json(data ?? { status: "expired" });
+    }
+    if (!sid) {
+      const { data, error } = await db.from("chat_sessions").insert({}).select("id").single();
+      if (error) return json({ error: "DB error" }, 500);
+      sid = data.id;
+    }
+    const { data: bot } = await db.from("app_settings").select("value").eq("key", "bot_username").maybeSingle();
+    const { data: token, error } = await db.rpc("tg_login_start", { p_session_id: sid });
+    if (error || !bot?.value) return json({ error: "Вход через Telegram сейчас недоступен" }, 500);
+    return json({ session_id: sid, token, link: `https://t.me/${bot.value}?start=login_${token}` });
   }
 
   const text = String(body?.message ?? "").trim();
@@ -417,29 +500,31 @@ Deno.serve(async (req) => {
   const userTexts = rows.filter((r: any) => r.role === "user" && typeof r.content === "string");
   const tenMinAgo = Date.now() - 10 * 60 * 1000;
   if (userTexts.length >= MAX_USER_MESSAGES_PER_SESSION) {
-    return json({ session_id: sessionId, reply: "Этот диалог получился очень длинным. Нажмите «Новый диалог» вверху окна: я по-прежнему увижу ваши записи и помогу с ними. Или позвоните нам: +7 (495) 000-12-34." });
+    return json({ session_id: sessionId, reply: "Этот диалог получился очень длинным. Нажмите «Новый диалог» вверху окна и, если нужно, «Войти через Telegram» — тогда я увижу ваши записи. Или позвоните нам: +7 (495) 000-12-34." });
   }
   if (userTexts.filter((r: any) => new Date(r.created_at).getTime() > tenMinAgo).length >= MAX_USER_MESSAGES_PER_10_MIN) {
     return json({ session_id: sessionId, reply: "Вы отправили много сообщений подряд. Подождите, пожалуйста, пару минут и напишите снова. Если срочно — звоните: +7 (495) 000-12-34." });
   }
 
-  // Прошлые диалоги этого браузера: записи из них пациент тоже может переносить и отменять.
-  // Принимаем только существующие диалоги; номер диалога — случайный UUID, угадать чужой нельзя.
-  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const claimed = (Array.isArray(body?.known_sessions) ? body.known_sessions : [])
-    .filter((x: unknown) => typeof x === "string" && UUID.test(x as string)).slice(0, MAX_KNOWN_SESSIONS);
-  let owned: string[] = [sessionId!];
-  if (claimed.length) {
-    const { data: existing } = await db.from("chat_sessions").select("id").in("id", claimed);
-    owned = [...new Set([sessionId!, ...(existing ?? []).map((r: any) => r.id)])];
-  }
+  // Без подтверждения личности доступны только записи этого диалога: за одним компьютером могут сидеть разные люди
+  const owned: string[] = [sessionId!];
 
-  // Личная ссылка из напоминания Лиды: открывает Зое записи этого пациента
-  let linkedPatient: number | null = null;
-  if (typeof body?.appt_token === "string" && /^[0-9a-f]{24}$/.test(body.appt_token)) {
-    const { data: link } = await db.rpc("appt_by_token", { p_token: body.appt_token });
-    if (link?.patient_id) linkedPatient = link.patient_id;
+  // Кто с нами говорит: вход через Telegram в этом диалоге или личная ссылка из напоминания Лиды
+  let patient: { id: number; name: string; via: string } | null = null;
+  {
+    const { data: sess } = await db.from("chat_sessions").select("verified_patient_id, verified_at, patients:verified_patient_id(full_name)").eq("id", sessionId).maybeSingle();
+    if (sess?.verified_patient_id && Date.now() - new Date(sess.verified_at).getTime() < VERIFIED_HOURS * 3600_000) {
+      patient = { id: sess.verified_patient_id, name: (sess as any).patients?.full_name ?? "", via: "вход через Telegram" };
+    }
   }
+  if (!patient && typeof body?.appt_token === "string" && /^[0-9a-f]{24}$/.test(body.appt_token)) {
+    const { data: link } = await db.rpc("appt_by_token", { p_token: body.appt_token });
+    if (link?.patient_id) {
+      const { data: p } = await db.from("patients").select("full_name").eq("id", link.patient_id).maybeSingle();
+      patient = { id: link.patient_id, name: p?.full_name ?? "", via: "личная ссылка из напоминания" };
+    }
+  }
+  const patientId: number | null = patient?.id ?? null;
 
   const history: any[] = rows.map((r: any) => ({ role: r.role, content: r.content }));
   const newMessages: any[] = [{ role: "user", content: text }];
@@ -463,7 +548,7 @@ Deno.serve(async (req) => {
       const started = Date.now();
       let response: any;
       try {
-        response = await callClaude([...history, ...newMessages]);
+        response = await callClaude([...history, ...newMessages], patient);
       } catch (e: any) {
         await logCall({ session_id: sessionId, round, error: String(e?.message ?? e).slice(0, 500), duration_ms: Date.now() - started, is_eval: isEval });
         throw e;
@@ -487,7 +572,7 @@ Deno.serve(async (req) => {
       const results = [];
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
-        const r = await runTool(block.name, block.input, sessionId!, owned, linkedPatient);
+        const r = await runTool(block.name, block.input, sessionId!, owned, patientId);
         console.log(JSON.stringify({ session: sessionId, tool: block.name, input: block.input, error: !!r.is_error }));
         results.push({ type: "tool_result", tool_use_id: block.id, content: r.content, ...(r.is_error ? { is_error: true } : {}) });
       }

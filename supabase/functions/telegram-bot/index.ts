@@ -4,7 +4,8 @@
 //   • /start <токен> — привязывает Telegram к пациенту (одноразовая ссылка, которую Зоя даёт после записи);
 //   • напоминание за день до приёма (action: "send_reminders", вызывается из базы по расписанию):
 //     в тексте только дата и время, подробности — на странице записи на сайте (r.html?t=<токен>);
-//   • кнопки «Приду» / «Отменить» прямо в Telegram, «Подробнее и перенос» — ссылка на страницу записи.
+//   • кнопки «Приду» / «Отменить» прямо в Telegram, «Подробнее и перенос» — ссылка на страницу записи;
+//   • /start login_<токен> — подтверждение входа на сайт: «Это вы входите?» → Да / Нет.
 // Свободную переписку Лида не ведёт: чтобы в иностранный мессенджер не уходили подробности о здоровье.
 // На любое сообщение она отвечает подсказкой со ссылкой на запись и на Зою.
 
@@ -108,6 +109,7 @@ async function handleMessage(msg: any) {
 
   if (text.startsWith("/start")) {
     const token = text.split(/\s+/)[1];
+    if (token?.startsWith("login_")) return handleLogin(chatId, token.slice(6));
     if (token) {
       const { data, error } = await db.rpc("use_tg_link", { p_token: token, p_chat_id: chatId });
       if (error) {
@@ -135,13 +137,39 @@ async function handleMessage(msg: any) {
     { reply_markup: await linkButtons(list) });
 }
 
+// Вход на сайт через Telegram. Кнопка подтверждения обязательна: иначе злоумышленник мог бы
+// подсунуть пациенту свою ссылку и войти на сайте под его именем, как только тот нажмёт Start.
+async function handleLogin(chatId: number, token: string) {
+  const { data } = await db.rpc("tg_login_attach", { p_token: token, p_chat_id: chatId });
+  if (data?.status === "not_linked") {
+    return send(chatId, `Ваш Telegram пока не привязан к записи в клинике, поэтому войти не получится.\n\nЗапишитесь у администратора Зои на сайте — после записи она пришлёт личную ссылку на этого бота. Или позвоните: ${PHONE}.`);
+  }
+  if (data?.status !== "awaiting_confirm") return send(chatId, "Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.");
+  return send(chatId, `Вход в чат на сайте клиники «Улыбка».\n\n${data.name}, это вы сейчас входите? Если вы ничего не открывали на сайте — нажмите «Нет».`, {
+    reply_markup: { inline_keyboard: [[{ text: "✅ Да, это я", callback_data: `ly:${token}` }, { text: "Нет", callback_data: `ln:${token}` }]] },
+  });
+}
+
 async function handleCallback(cb: any) {
   const chatId = cb.message?.chat?.id, messageId = cb.message?.message_id;
   const answer = (text?: string) => tg("answerCallbackQuery", { callback_query_id: cb.id, ...(text ? { text } : {}) }).catch(() => {});
+  const [kind, rawId] = String(cb.data ?? "").split(":");
+
+  // Подтверждение входа на сайт
+  if ((kind === "ly" || kind === "ln") && chatId) {
+    const { data } = await db.rpc("tg_login_confirm", { p_token: rawId, p_chat_id: chatId, p_yes: kind === "ly" });
+    const textByStatus: Record<string, string> = {
+      confirmed: "✅ Готово, вы вошли. Вернитесь на сайт — Зоя уже видит ваши записи.",
+      rejected: "Вход отклонён. Если это были не вы, просто проигнорируйте: без вашего подтверждения никто не увидит ваши данные.",
+    };
+    await answer(data?.status === "confirmed" ? "Вход подтверждён" : undefined);
+    await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: textByStatus[data?.status] ?? "Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз." }).catch(() => {});
+    return;
+  }
+
   const patient = chatId ? await patientByChat(chatId) : null;
   if (!patient) { await answer("Запись не найдена"); return; }
 
-  const [kind, rawId] = String(cb.data ?? "").split(":");
   const id = Number(rawId);
   const original = cb.message?.text ?? "";
   const finish = (suffix: string) => tg("editMessageText", { chat_id: chatId, message_id: messageId, text: `${original}\n\n${suffix}` }).catch(() => {});

@@ -64,6 +64,17 @@ for (const c of selected) {
   const notes = [];
   let sessionId = null;
   const replies = [];
+  // Подготовка: диалог, где личность уже подтверждена (тестовый пациент «Тест Памятин», пожелание «только после 18:00»)
+  if (c.setup === "verified_patient") {
+    const res = await fetch(ZOYA_URL.replace(/\/zoya$/, "/evals"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, "x-eval-key": EVAL_KEY },
+      body: JSON.stringify({ action: "verified_session" }),
+    });
+    const d = await res.json();
+    if (!d.session_id) { console.log(`❌ ${c.id}: не удалось подготовить подтверждённого пациента`); continue; }
+    sessionId = d.session_id;
+  }
   const tools = [];
   let cost = 0;
   try {
