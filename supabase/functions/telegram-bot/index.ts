@@ -14,7 +14,10 @@ const MAX_MESSAGES_PER_10_MIN = 20;
 const HISTORY_LIMIT = 40;
 const SITE_URL = "https://danya-cc.github.io/ulybka/";
 
-const TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+// Два разных бота: Лида для пациентов (этот файл) и служебный бот владельца (notify-admin).
+// Пока токен Лиды не добавлен в секреты, работаем через общий бот.
+const ADMIN_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+const TOKEN = Deno.env.get("TELEGRAM_PATIENT_BOT_TOKEN") ?? ADMIN_TOKEN;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -24,8 +27,8 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: fal
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
 
 // ---------------- Telegram ----------------
-async function tg(method: string, payload: unknown) {
-  const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
+async function tg(method: string, payload: unknown, token = TOKEN) {
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
   const data = await res.json();
@@ -271,13 +274,7 @@ async function handleMessage(msg: any) {
   }
 
   const patient = await patientByChat(chatId);
-  if (!patient) {
-    // Чат администратора: сюда приходят уведомления. Если админ сам подписался как пациент — работаем как с пациентом.
-    if (String(chatId) === (await getSetting("admin_chat_id"))) {
-      return send(chatId, "Это служебный чат клиники: сюда приходят уведомления о записях и заявках.");
-    }
-    return send(chatId, NOT_LINKED);
-  }
+  if (!patient) return send(chatId, NOT_LINKED);
   await tg("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
   return send(chatId, await runAgent(chatId, patient, text));
 }
@@ -341,12 +338,31 @@ Deno.serve(async (req) => {
       if (!cronSecret) await setSetting("cron_secret", randomHex(24));
       return json({ ok: true, bot: "@" + me.username });
     }
+    // Разделение ботов: старый бот становится служебным для владельца, новый — Лида для пациентов
+    if (body.action === "split_bots") {
+      if (!authorized) return json({ error: "Forbidden" }, 403);
+      if (TOKEN === ADMIN_TOKEN) return json({ ok: false, message: "Секрет TELEGRAM_PATIENT_BOT_TOKEN ещё не добавлен" });
+      const admin = await tg("getMe", {}, ADMIN_TOKEN);
+      await tg("deleteWebhook", { drop_pending_updates: true }, ADMIN_TOKEN);
+      await tg("setMyName", { name: "Улыбка · для администратора" }, ADMIN_TOKEN);
+      await tg("setMyShortDescription", { short_description: "Служебный бот клиники «Улыбка»: уведомления о записях, отменах и заявках." }, ADMIN_TOKEN);
+      await tg("setMyDescription", { description: "Служебный бот стоматологии «Улыбка» для владельца и администраторов.\n\nСюда приходят уведомления о новых записях, переносах, отменах и заявках на звонок. Пациентам нужен другой бот — ссылку на него присылает Зоя на сайте." }, ADMIN_TOKEN);
+      const webhookSecret = randomHex(24);
+      const me = await tg("getMe", {});
+      await tg("setWebhook", { url: `${SUPABASE_URL}/functions/v1/telegram-bot`, secret_token: webhookSecret,
+        allowed_updates: ["message", "callback_query"], drop_pending_updates: true });
+      await setSetting("webhook_secret", webhookSecret);
+      await setSetting("bot_username", me.username);
+      body.action = "set_profile"; // ниже сразу настроим профиль Лиды
+      console.log(JSON.stringify({ admin_bot: admin.username, patient_bot: me.username }));
+    }
     if (body.action === "set_profile") {
       if (!authorized) return json({ error: "Forbidden" }, 403);
       await tg("setMyName", { name: "Лида · клиника «Улыбка»" });
       await tg("setMyShortDescription", { short_description: "Напоминаю о приёме в стоматологии «Улыбка», помогаю перенести или отменить запись." });
       await tg("setMyDescription", { description: "Здравствуйте! Я Лида, ассистент стоматологии «Улыбка».\n\nНапомню о приёме за день до визита, помогу подтвердить, перенести или отменить запись.\n\nЧтобы подключиться, запишитесь на сайте — администратор Зоя пришлёт личную ссылку." });
-      return json({ ok: true });
+      const me = await tg("getMe", {});
+      return json({ ok: true, patient_bot: "@" + me.username });
     }
     if (body.action === "send_reminders") {
       if (!authorized) return json({ error: "Forbidden" }, 403);
