@@ -137,6 +137,7 @@ function render(a){
   let badge = '';
   if(a.status === 'cancelled') badge = '<span class="badge off">Запись отменена</span>';
   else if(a.status !== 'booked' || a.in_past) badge = '<span class="badge">Приём уже прошёл</span>';
+  else if(a.moved && a.confirmed) badge = '<span class="badge">✓ Запись перенесена на новое время — ждём вас!</span>';
   else if(a.confirmed) badge = '<span class="badge">✓ Вы подтвердили визит — ждём вас!</span>';
   $('badge').innerHTML = badge;
 
