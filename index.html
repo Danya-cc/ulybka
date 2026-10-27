@@ -291,11 +291,16 @@ function rememberSession(id){
   } catch(e) {}
 }
 
+// Личная ссылка из напоминания Лиды (страница записи → «Перенести»): даёт Зое доступ к записям этого пациента
+function apptToken(){
+  try { return sessionStorage.getItem('zoya_appt') || null; } catch(e) { return null; }
+}
+
 async function askManager(text){
   const res = await fetch(ZOYA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-    body: JSON.stringify({ session_id: sessionId, message: text, known_sessions: knownSessions() })
+    body: JSON.stringify({ session_id: sessionId, message: text, known_sessions: knownSessions(), appt_token: apptToken() })
   });
   if(!res.ok) throw new Error('Зоя ответила ошибкой ' + res.status);
   const data = await res.json();
@@ -448,7 +453,16 @@ lead.addEventListener('submit', async e => {
 });
 ['lead-name','lead-phone'].forEach(id => document.getElementById(id).addEventListener('input', () => document.getElementById('lead-err').textContent = ''));
 
-restoreHistory();   // в самом конце: к этому моменту все константы уже объявлены
+// Пришли со страницы записи по кнопке «Перенести»: новый диалог, Зоя сразу видит запись
+const params = new URLSearchParams(location.search);
+if(/^[0-9a-f]{24}$/.test(params.get('appt') || '')){
+  try { sessionStorage.setItem('zoya_appt', params.get('appt')); } catch(e) {}
+  history.replaceState(null, '', location.pathname); // чтобы при обновлении страницы сообщение не ушло ещё раз
+  newChat();
+  openChat('Хочу перенести свою запись');
+} else {
+  restoreHistory();   // в самом конце: к этому моменту все константы уже объявлены
+}
 </script>
 </body>
 </html>

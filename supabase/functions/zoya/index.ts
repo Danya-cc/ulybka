@@ -53,7 +53,7 @@ function systemPrompt(): string {
 1. Рассказывать об услугах, ценах и врачах. Всегда бери цены и врачей из инструмента get_services, не по памяти.
 2. Подбирать свободное время через get_free_slots. Предлагай 2–3 варианта, а не весь список.
 3. Записывать на приём через book_appointment.
-4. Переносить и отменять записи, сделанные с этого устройства — в этом или прошлых чатах на сайте (get_my_appointments, reschedule_appointment, cancel_appointment).
+4. Переносить и отменять записи, сделанные с этого устройства — в этом или прошлых чатах на сайте (get_my_appointments, reschedule_appointment, cancel_appointment). Если пациент пришёл по личной ссылке из напоминания в Telegram, get_my_appointments покажет и все его записи — с ними можно работать так же.
 5. Оставлять заявку на звонок администратора через create_lead.
 
 Имена и названия:
@@ -191,6 +191,7 @@ const DB_ERRORS: Record<string, string> = {
   APPOINTMENT_NOT_IN_THIS_CHAT: "Эта запись сделана не с этого устройства, менять её нельзя. Оформи заявку администратору через create_lead.",
   APPOINTMENT_NOT_ACTIVE: "Эта запись уже отменена или завершена.",
   APPOINTMENT_IN_PAST: "Время этой записи уже прошло.",
+  APPOINTMENT_NOT_FOUND: "Такой записи нет среди записей пациента. Проверь get_my_appointments.",
   SAME_SLOT: "Пациент уже записан на это время.",
 };
 const explain = (msg: string) => {
@@ -199,7 +200,8 @@ const explain = (msg: string) => {
 };
 
 // ---------- Инструменты: выполнение ----------
-async function runTool(name: string, input: any, sessionId: string, owned: string[]): Promise<{ content: string; is_error?: boolean }> {
+// linkedPatient — пациент, пришедший по личной ссылке из напоминания (или null)
+async function runTool(name: string, input: any, sessionId: string, owned: string[], linkedPatient: number | null): Promise<{ content: string; is_error?: boolean }> {
   try {
     if (name === "get_services") {
       const { data, error } = await db
@@ -256,10 +258,24 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
     if (name === "get_my_appointments") {
       const { data, error } = await db.rpc("get_session_appointments", { p_session_ids: owned });
       if (error) throw error;
-      return { content: data.length ? JSON.stringify(data) : "Записей, сделанных в чате с этого устройства, нет." };
+      let list: any[] = data;
+      if (linkedPatient) {
+        const { data: own, error: e2 } = await db.rpc("patient_appointments", { p_patient_id: linkedPatient });
+        if (e2) throw e2;
+        const seen = new Set(list.map((a: any) => a.appointment_id));
+        list = [...list, ...own.filter((a: any) => !seen.has(a.appointment_id))];
+      }
+      return { content: list.length ? JSON.stringify(list) : "Записей, сделанных в чате с этого устройства, нет." };
     }
 
     if (name === "reschedule_appointment") {
+      if (linkedPatient) {
+        const { data, error } = await db.rpc("patient_reschedule_appointment", {
+          p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_patient_id: linkedPatient,
+        });
+        if (!error) return { content: "Запись перенесена: " + JSON.stringify(data) };
+        if (!error.message.includes("APPOINTMENT_NOT_FOUND")) throw error; // не его запись — пробуем как запись из чата
+      }
       const { data, error } = await db.rpc("reschedule_appointment", {
         p_appointment_id: input.appointment_id, p_new_slot_id: input.new_slot_id, p_session_ids: owned,
       });
@@ -268,6 +284,11 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
     }
 
     if (name === "cancel_appointment") {
+      if (linkedPatient) {
+        const { data, error } = await db.rpc("patient_cancel_appointment", { p_appointment_id: input.appointment_id, p_patient_id: linkedPatient });
+        if (!error) return { content: "Запись отменена: " + JSON.stringify(data) };
+        if (!error.message.includes("APPOINTMENT_NOT_FOUND")) throw error;
+      }
       const { data, error } = await db.rpc("cancel_appointment", {
         p_appointment_id: input.appointment_id, p_session_ids: owned,
       });
@@ -384,6 +405,13 @@ Deno.serve(async (req) => {
     owned = [...new Set([sessionId!, ...(existing ?? []).map((r: any) => r.id)])];
   }
 
+  // Личная ссылка из напоминания Лиды: открывает Зое записи этого пациента
+  let linkedPatient: number | null = null;
+  if (typeof body?.appt_token === "string" && /^[0-9a-f]{24}$/.test(body.appt_token)) {
+    const { data: link } = await db.rpc("appt_by_token", { p_token: body.appt_token });
+    if (link?.patient_id) linkedPatient = link.patient_id;
+  }
+
   const history: any[] = rows.map((r: any) => ({ role: r.role, content: r.content }));
   const newMessages: any[] = [{ role: "user", content: text }];
 
@@ -402,7 +430,7 @@ Deno.serve(async (req) => {
       const results = [];
       for (const block of response.content) {
         if (block.type !== "tool_use") continue;
-        const r = await runTool(block.name, block.input, sessionId!, owned);
+        const r = await runTool(block.name, block.input, sessionId!, owned, linkedPatient);
         console.log(JSON.stringify({ session: sessionId, tool: block.name, input: block.input, error: !!r.is_error }));
         results.push({ type: "tool_result", tool_use_id: block.id, content: r.content, ...(r.is_error ? { is_error: true } : {}) });
       }
