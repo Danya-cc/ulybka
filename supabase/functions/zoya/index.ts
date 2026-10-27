@@ -7,6 +7,7 @@
 //   4. Сохраняем новые сообщения в базу и возвращаем ответ на сайт.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { KNOWLEDGE } from "./knowledge.ts"; // собирается из knowledge/clinic.md
 
 // ---------- Настройки ----------
 const MODEL = "claude-sonnet-5-5";
@@ -32,6 +33,15 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
+// ---------- База знаний: разделы по заголовкам «## » ----------
+const SECTIONS: Record<string, string> = {};
+for (const part of KNOWLEDGE.split(/^## /m).slice(1)) {
+  const nl = part.indexOf("\n");
+  SECTIONS[part.slice(0, nl).trim()] = part.slice(nl + 1).trim();
+}
+const MAIN_SECTION = "Основное";
+const EXTRA_SECTIONS = Object.keys(SECTIONS).filter((t) => t !== MAIN_SECTION);
+
 // ---------- Системный промпт ----------
 function systemPrompt(): string {
   const now = new Date();
@@ -42,12 +52,10 @@ function systemPrompt(): string {
 
 Сейчас: ${fmt({ weekday: "long", day: "numeric", month: "long", year: "numeric" })}, ${fmt({ hour: "2-digit", minute: "2-digit" })} по Москве. Сегодняшняя дата в формате для инструментов: ${iso}.
 
-О клинике:
-- Адрес: ул. Садовая, 12, 2 этаж, 5 минут пешком от метро «Парковая».
-- Работаем ежедневно с 9:00 до 21:00. Телефон: +7 (495) 000-12-34.
-- Первая консультация и осмотр бесплатно. Рассрочка 0% до 12 месяцев. Гарантия на пломбы и коронки 2 года.
-- Оплата картой или наличными. Детей с 6 лет принимаем, но запись детей — только через администратора по телефону.
-- Других акций и скидок нет. Не придумывай их.
+Факты о клинике (раздел «${MAIN_SECTION}» базы знаний):
+${SECTIONS[MAIN_SECTION]}
+
+Остальные факты — в разделах базы знаний: ${EXTRA_SECTIONS.map((t) => `«${t}»`).join(", ")}. Открывай нужный раздел инструментом get_clinic_info, когда вопрос касается его темы. Если факта нет ни в одном разделе, не придумывай: скажи, что уточнишь у администратора, и предложи create_lead или звонок.
 
 Что ты умеешь:
 1. Рассказывать об услугах, ценах и врачах. Всегда бери цены и врачей из инструмента get_services, не по памяти.
@@ -105,6 +113,15 @@ const TOOLS = [
     name: "get_services",
     description: "Список услуг клиники: id, название, описание, цена (price_is_from=true значит «от»), длительность и врачи, которые оказывают услугу (с их id).",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_clinic_info",
+    description: "Открыть раздел базы знаний клиники: правила записи и отмены, что взять с собой, оплата и рассрочка, гарантии, подготовка к визиту, частые вопросы. Цены и врачей здесь нет — для них get_services.",
+    input_schema: {
+      type: "object",
+      properties: { section: { type: "string", enum: EXTRA_SECTIONS, description: "Название раздела" } },
+      required: ["section"],
+    },
   },
   {
     name: "get_free_slots",
@@ -217,6 +234,11 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
       return { content: JSON.stringify(list) };
     }
 
+    if (name === "get_clinic_info") {
+      const text = SECTIONS[input.section];
+      return text ? { content: text } : { content: `Раздела «${input.section}» нет. Есть: ${EXTRA_SECTIONS.join(", ")}.`, is_error: true };
+    }
+
     if (name === "get_free_slots") {
       const { data, error } = await db.rpc("get_free_slots", {
         p_service_id: input.service_id,
@@ -317,6 +339,13 @@ async function runTool(name: string, input: any, sessionId: string, owned: strin
   }
 }
 
+// ---------- Журнал: каждый вызов Claude с токенами (стоимость считает база по таблице ai_prices) ----------
+async function logCall(row: Record<string, unknown>): Promise<number> {
+  const { data, error } = await db.from("ai_calls").insert({ agent: "zoya", model: MODEL, ...row }).select("cost_usd").single();
+  if (error) { console.error("journal error", error.message); return 0; }
+  return Number(data?.cost_usd ?? 0);
+}
+
 // ---------- Вызов Claude API ----------
 async function callClaude(messages: any[]) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -415,11 +444,39 @@ Deno.serve(async (req) => {
   const history: any[] = rows.map((r: any) => ({ role: r.role, content: r.content }));
   const newMessages: any[] = [{ role: "user", content: text }];
 
+  // Режим автотестов: по секретному ключу отдаём список вызванных инструментов и стоимость
+  let isEval = false;
+  const evalKey = req.headers.get("x-eval-key");
+  if (evalKey) {
+    const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(evalKey)))]
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data: s } = await db.from("app_settings").select("value").eq("key", "eval_key_sha256").maybeSingle();
+    isEval = !!s?.value && s.value === hash;
+  }
+  const usedTools: string[] = [];
+  let costUsd = 0;
+
   // 3. Цикл агента
   let reply = "";
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-      const response = await callClaude([...history, ...newMessages]);
+      const started = Date.now();
+      let response: any;
+      try {
+        response = await callClaude([...history, ...newMessages]);
+      } catch (e: any) {
+        await logCall({ session_id: sessionId, round, error: String(e?.message ?? e).slice(0, 500), duration_ms: Date.now() - started, is_eval: isEval });
+        throw e;
+      }
+      const u = response.usage ?? {};
+      const callTools = response.content.filter((b: any) => b.type === "tool_use").map((b: any) => b.name);
+      usedTools.push(...callTools);
+      costUsd += await logCall({
+        session_id: sessionId, round, duration_ms: Date.now() - started, stop_reason: response.stop_reason, tools: callTools,
+        input_tokens: u.input_tokens ?? 0, output_tokens: u.output_tokens ?? 0,
+        cache_write_tokens: u.cache_creation_input_tokens ?? 0, cache_read_tokens: u.cache_read_input_tokens ?? 0,
+        is_eval: isEval,
+      });
       newMessages.push({ role: "assistant", content: response.content });
 
       if (response.stop_reason !== "tool_use") {
@@ -455,5 +512,5 @@ Deno.serve(async (req) => {
   );
   if (saveErr) console.error("save error", saveErr);
 
-  return json({ session_id: sessionId, reply });
+  return json({ session_id: sessionId, reply, ...(isEval ? { debug: { tools: usedTools, cost_usd: Number(costUsd.toFixed(6)) } } : {}) });
 });

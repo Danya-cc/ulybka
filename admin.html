@@ -109,6 +109,25 @@ table.grid{border-collapse:collapse;width:100%;min-width:640px}
 .slot b{display:block;font-size:14px}
 .slot[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .ok{background:var(--ok-soft);color:var(--accent);border-radius:10px;padding:10px 12px;font-weight:600}
+/* Журнал ИИ */
+.j-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.j-head label{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--muted);flex-direction:row;white-space:nowrap}
+.j-head input[type=checkbox]{width:auto;margin:0}
+.j-head input[type=number]{width:90px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.stat .lbl{font-size:13px;color:var(--muted)}
+.stat .big{font-size:26px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin:2px 0}
+.stat .sub{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.dlg{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 16px;display:grid;grid-template-columns:1fr auto;gap:6px 16px;cursor:pointer}
+.dlg:hover{border-color:var(--accent)}
+.dlg .q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg .cost{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.dlg .tools{display:flex;gap:4px;flex-wrap:wrap;grid-column:1/-1}
+.tool{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--bg);color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+.tm.tool-call{align-self:flex-start;background:none;border:1px dashed var(--line);color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.dlgs{display:grid;gap:8px}
+@media (max-width:760px){ .stats{grid-template-columns:1fr} }
 @media (max-width:760px){ .book,.row{grid-template-columns:1fr} .who{margin-left:0;width:100%} .lead{grid-template-columns:1fr} .lead .acts{justify-content:flex-start} }
 </style>
 </head>
@@ -135,6 +154,7 @@ table.grid{border-collapse:collapse;width:100%;min-width:640px}
         <button class="tab" role="tab" data-tab="schedule" aria-selected="true">Расписание</button>
         <button class="tab" role="tab" data-tab="leads">Заявки <span class="count" id="leads-count" hidden>0</span></button>
         <button class="tab" role="tab" data-tab="book">Записать пациента</button>
+        <button class="tab" role="tab" data-tab="journal">Журнал ИИ</button>
       </nav>
       <div class="who"><span id="who"></span><button class="btn ghost small" id="logout">Выйти</button></div>
     </header>
@@ -186,6 +206,17 @@ table.grid{border-collapse:collapse;width:100%;min-width:640px}
             <button class="btn" type="submit" id="b-submit">Записать</button>
           </form>
         </div>
+      </section>
+      <!-- Журнал ИИ -->
+      <section id="tab-journal" hidden>
+        <div class="j-head">
+          <label><input type="checkbox" id="j-evals"> показывать автотесты</label>
+          <label>Курс: 1 $ = <input type="number" id="j-rate" min="1" step="0.01" placeholder="—"> ₽</label>
+          <button class="btn ghost small" id="j-refresh" type="button">Обновить</button>
+        </div>
+        <div class="stats" id="j-stats"></div>
+        <h2 style="font-size:16px;margin:0 0 10px">Последние диалоги с Зоей</h2>
+        <div class="dlgs" id="j-dialogs"></div>
       </section>
     </main>
   </div>
@@ -252,7 +283,8 @@ $('logout').addEventListener('click', async () => { await sb.auth.signOut(); loc
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => openTab(t.dataset.tab)));
 function openTab(name){
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
-  ['schedule','leads','book'].forEach(n => $('tab-' + n).hidden = n !== name);
+  ['schedule','leads','book','journal'].forEach(n => $('tab-' + n).hidden = n !== name);
+  if(name === 'journal') loadJournal();
 }
 
 // ===================== Расписание дня =====================
@@ -393,6 +425,80 @@ $('leads').addEventListener('click', async e => {
     box.innerHTML = msgs.map(m => `<div class="tm ${m.role}">${esc(m.text)}</div>`).join('') || '<span class="muted">Переписка пуста.</span>';
     card.appendChild(box); chat.textContent = 'Скрыть переписку';
   }
+});
+
+// ===================== Журнал ИИ =====================
+// Каждый вызов Claude записывается в ai_calls; стоимость считает база по таблице цен ai_prices.
+let usdRub = null;
+try { usdRub = Number(localStorage.getItem('usd_rub')) || null; } catch(e) {}
+if(usdRub) $('j-rate').value = usdRub;
+$('j-rate').addEventListener('change', e => {
+  usdRub = Number(e.target.value) || null;
+  try { usdRub ? localStorage.setItem('usd_rub', usdRub) : localStorage.removeItem('usd_rub'); } catch(err) {}
+  loadJournal();
+});
+$('j-evals').addEventListener('change', () => loadJournal());
+$('j-refresh').addEventListener('click', () => loadJournal());
+
+// 1 ответ, 2 ответа, 5 ответов
+const plural = (n, one, few, many) => { const m10 = n % 10, m100 = n % 100;
+  return `${n} ${m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many}`; };
+const money = usd => {
+  const v = Number(usd || 0);
+  const d = v < 0.1 ? '$' + v.toFixed(4) : '$' + v.toFixed(2);
+  return usdRub ? `${d} · ${(v * usdRub).toLocaleString('ru-RU', { maximumFractionDigits: v * usdRub < 10 ? 2 : 0 })} ₽` : d;
+};
+
+let journalSeq = 0;   // защита от гонки: показываем только ответ на последний запрос
+async function loadJournal(){
+  const seq = ++journalSeq;
+  const withEvals = $('j-evals').checked;
+  const since = addDays(todayMsk(), -29);
+  let q = sb.from('ai_daily').select('*').gte('day', since);
+  if(!withEvals) q = q.eq('is_eval', false);
+  let qd = sb.from('ai_dialogs').select('*').order('last_at', { ascending: false }).limit(40);
+  if(!withEvals) qd = qd.eq('is_eval', false);
+  const [{ data: days, error }, { data: dialogs }] = await Promise.all([q, qd]);
+  if(seq !== journalSeq) return;
+  if(error){ $('j-stats').innerHTML = `<div class="empty">Не удалось загрузить журнал: ${esc(error.message)}</div>`; return; }
+
+  const sum = from => (days || []).filter(d => d.day >= from).reduce((a, d) => ({
+    cost: a.cost + Number(d.cost_usd || 0), dialogs: a.dialogs + d.dialogs, replies: a.replies + d.replies, errors: a.errors + d.errors,
+  }), { cost: 0, dialogs: 0, replies: 0, errors: 0 });
+  const periods = [['Сегодня', todayMsk()], ['7 дней', addDays(todayMsk(), -6)], ['30 дней', since]];
+  $('j-stats').innerHTML = periods.map(([label, from]) => {
+    const s = sum(from);
+    const avg = s.dialogs ? s.cost / s.dialogs : 0;
+    return `<div class="stat"><div class="lbl">${label}</div><div class="big">${money(s.cost)}</div>
+      <div class="sub">${plural(s.dialogs,'диалог','диалога','диалогов')} · ${plural(s.replies,'ответ','ответа','ответов')}${s.errors ? ` · <span style="color:var(--bad)">${plural(s.errors,'ошибка','ошибки','ошибок')}</span>` : ''}</div>
+      <div class="sub">в среднем ${money(avg)} за диалог</div></div>`;
+  }).join('');
+
+  $('j-dialogs').innerHTML = (dialogs && dialogs.length) ? dialogs.map(d => `
+    <article class="dlg" data-sid="${d.session_id}">
+      <div class="q"><span class="muted" style="font-size:13px">${ago(d.last_at)}</span> · ${esc(d.first_message || '—')}</div>
+      <div class="cost">${money(d.cost_usd)}</div>
+      <div class="tools"><span class="chip src">${plural(d.replies,'ответ','ответа','ответов')}</span>${d.is_eval ? '<span class="chip src">тест</span>' : ''}${d.errors ? `<span class="chip" style="background:var(--bad-soft);color:var(--bad)">${plural(d.errors,'ошибка','ошибки','ошибок')}</span>` : ''}
+        ${(d.tools || []).map(t => `<span class="tool">${esc(t)}</span>`).join('')}</div>
+    </article>`).join('') : '<div class="empty">Пока ни одного диалога.</div>';
+}
+
+// Переписка с вызовами инструментов: видно, что Зоя делала «под капотом»
+$('j-dialogs').addEventListener('click', async e => {
+  const card = e.target.closest('.dlg'); if(!card || e.target.closest('.transcript')) return;
+  const open = card.querySelector('.transcript'); if(open){ open.remove(); return; }
+  const { data } = await sb.from('messages').select('role, content').eq('session_id', card.dataset.sid).order('id');
+  const items = (data || []).flatMap(m => {
+    if(typeof m.content === 'string') return [{ cls: m.role, text: m.content }];
+    return m.content.flatMap(b =>
+      b.type === 'text' ? [{ cls: 'assistant', text: b.text }]
+      : b.type === 'tool_use' ? [{ cls: 'tool-call', text: `🔧 ${b.name}(${JSON.stringify(b.input)})` }]
+      : b.type === 'tool_result' && b.is_error ? [{ cls: 'tool-call', text: `⚠️ ${String(b.content).slice(0, 160)}` }]
+      : []);
+  });
+  const box = document.createElement('div'); box.className = 'transcript';
+  box.innerHTML = items.map(m => `<div class="tm ${m.cls}">${esc(m.text)}</div>`).join('') || '<span class="muted">Переписка пуста.</span>';
+  card.appendChild(box);
 });
 
 // ===================== Запись по телефону =====================

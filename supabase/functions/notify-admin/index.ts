@@ -34,11 +34,17 @@ const when = (iso: string) => new Intl.DateTimeFormat("ru-RU", {
   timeZone: "Europe/Moscow", weekday: "short", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
 }).format(new Date(iso));
 const SOURCE: Record<string, string> = { chat: "из чата на сайте", form: "из формы на сайте", admin: "администратор", phone: "по телефону" };
+// Записи и заявки из диалогов автотестов владельцу не показываем
+async function isEval(sessionId: string | null) {
+  if (!sessionId) return false;
+  const { data } = await db.rpc("is_eval_session", { p_session_id: sessionId });
+  return data === true;
+}
 const isFresh = (iso: string) => Date.now() - new Date(iso).getTime() < FRESH_MINUTES * 60_000;
 
 async function loadAppointment(id: number) {
   const { data } = await db.from("appointments")
-    .select("id, status, comment, source, created_at, updated_at, notified_at, cancel_notified_at, patients(full_name, phone), services(name), doctors(full_name), slots(starts_at)")
+    .select("id, status, comment, source, session_id, created_at, updated_at, notified_at, cancel_notified_at, patients(full_name, phone), services(name), doctors(full_name), slots(starts_at)")
     .eq("id", id).maybeSingle();
   return data as any;
 }
@@ -85,6 +91,7 @@ Deno.serve(async (req) => {
   if (body.type === "appointment_created") {
     const a = await loadAppointment(id);
     if (!a || a.notified_at || !isFresh(a.created_at)) return json({ ok: true, skipped: true });
+    if (await isEval(a.session_id)) return json({ ok: true, skipped: "eval" });
     const moved = /перенесено с записи №(\d+)/.exec(a.comment ?? "");
     const title = moved ? "🔁 Перенос записи" : "🦷 Новая запись";
     text = `${title} (${SOURCE[a.source] ?? a.source})\n` +
@@ -104,6 +111,7 @@ Deno.serve(async (req) => {
   else if (body.type === "appointment_cancelled") {
     const a = await loadAppointment(id);
     if (!a || a.status !== "cancelled" || a.cancel_notified_at || !isFresh(a.updated_at)) return json({ ok: true, skipped: true });
+    if (await isEval(a.session_id)) return json({ ok: true, skipped: "eval" });
     // Если запись отменили ради переноса — об этом придёт сообщение «Перенос», отдельная «Отмена» не нужна
     const { data: successor } = await db.from("appointments").select("id").like("comment", `%перенесено с записи №${id})%`).maybeSingle();
     if (successor) {
@@ -121,6 +129,7 @@ Deno.serve(async (req) => {
   else if (body.type === "lead_created") {
     const { data: l } = await db.from("leads").select("*").eq("id", id).maybeSingle();
     if (!l || l.notified_at || !isFresh(l.created_at)) return json({ ok: true, skipped: true });
+    if (await isEval(l.session_id)) return json({ ok: true, skipped: "eval" });
     text = `📞 Заявка на звонок (${SOURCE[l.source] ?? l.source})\n` +
       `${l.name}, ${phone(l.phone)}` +
       (l.comment ? `\n${l.comment}` : "");

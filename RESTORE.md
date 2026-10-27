@@ -8,11 +8,13 @@
 | Что | Где | Есть в Git |
 |---|---|---|
 | Сайт: `index.html`, `r.html`, `admin.html` | этот репозиторий → GitHub Pages | да |
-| Код функций: `zoya`, `appointment`, `telegram-bot`, `notify-admin` | `supabase/functions/` | да |
+| Код функций: `zoya`, `appointment`, `telegram-bot`, `notify-admin`, `evals` | `supabase/functions/` | да |
+| База знаний Зои | `knowledge/clinic.md` (собирается в `supabase/functions/zoya/knowledge.ts`) | да |
+| Тесты Зои | `evals/zoya.yaml` + `evals/run.mjs` | да |
 | Структура базы: таблицы, правила, триггеры, права, расписание (cron), справочники врачей и услуг | `supabase/migrations/` (19 файлов, применять по порядку) | да |
 | Секреты: ключ Claude API, токены двух Telegram-ботов | менеджер паролей владельца | **нет, и не должно быть** |
 | Данные: пациенты, записи, заявки, переписки | бэкапы базы | **нет, и не должно быть** (персональные данные) |
-| Служебные настройки: `admin_chat_id`, `bot_username`, `webhook_secret`, `cron_secret` | таблица `app_settings`, создаются заново (шаг 6) | нет |
+| Служебные настройки: `admin_chat_id`, `bot_username`, `webhook_secret`, `cron_secret`, `eval_key_sha256` | таблица `app_settings`, создаются заново (шаги 6 и 9) | нет |
 | Сотрудники с доступом в админку | Supabase Auth + таблица `staff` (шаг 7) | нет |
 
 Проверено 27.10.2026: все миграции применены к чистой базе PostgreSQL, и результат совпал с рабочей базой
@@ -50,7 +52,8 @@ supabase db push
 
 ### 4. Функции и секреты
 ```bash
-supabase functions deploy zoya appointment telegram-bot notify-admin --no-verify-jwt
+python3 scripts/build_knowledge.py     # база знаний → модуль для Зои
+supabase functions deploy zoya appointment telegram-bot notify-admin evals --no-verify-jwt
 supabase secrets set ANTHROPIC_API_KEY=... TELEGRAM_BOT_TOKEN=... TELEGRAM_PATIENT_BOT_TOKEN=...
 ```
 - `TELEGRAM_BOT_TOKEN` — служебный бот владельца (уведомления).
@@ -94,6 +97,7 @@ psql "<строка подключения к новой базе>" -f backup-da
 - [ ] Ссылка из ответа Зои подключает Лиду в Telegram.
 - [ ] `select public.call_bot_action('send_reminders');` возвращает `200` в `net._http_response`.
 - [ ] Тестовую запись удалить.
+- [ ] Задать ключ автотестов (см. `evals/README.md`) и прогнать `node evals/run.mjs`: все критические тесты зелёные.
 
 ## Правило на будущее
 

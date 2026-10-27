@@ -1,0 +1,7 @@
+{
+  "name": "ulybka-evals",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node run.mjs" },
+  "dependencies": { "yaml": "2.6.1" }
+}
